@@ -5,11 +5,11 @@ console.log(import.meta.env.VITE_API_URL);
 const API_URL = import.meta.env.VITE_API_URL;
 
 const MultiSearchPage = () => {
-  const [query, setQuery] = useState("");
-  const [data, setData] = useState(null);
+  const [query, setQuery] = useState(() => localStorage.getItem("search-query") || "");
+  const [data, setData] = useState(() => JSON.parse(localStorage.getItem("search-data")) || null);
   const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState([]);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
 
 
   // Load recent searches on refresh
@@ -17,6 +17,13 @@ const MultiSearchPage = () => {
     const saved = JSON.parse(localStorage.getItem("recent-searches")) || [];
     setRecent(saved);
   }, []);
+
+  // Persist search state on change
+  useEffect(() => {
+    localStorage.setItem("search-query", query);
+    localStorage.setItem("search-data", JSON.stringify(data));
+    localStorage.setItem("has-searched", hasSearched);
+  }, [query, data, hasSearched]);
 
   const getRelevanceLabel = (score = 0) => {
     if (score >= 40) return "Medium relevance";
@@ -69,6 +76,9 @@ const MultiSearchPage = () => {
               setQuery("");
               setData(null);
               setHasSearched(false);
+              localStorage.removeItem("search-query");
+              localStorage.removeItem("search-data");
+              localStorage.removeItem("has-searched");
             }}
             title="Back to Search"
           >
