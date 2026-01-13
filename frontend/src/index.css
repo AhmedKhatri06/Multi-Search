@@ -1,0 +1,254 @@
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont;
+  background: #e5edf5;
+  color: #111;
+}
+
+.container {
+  margin-left: 5rem;
+  margin-right: 5rem;
+  padding: 24px;
+}
+
+.back-btn {
+  background: #64748b;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+
+h1 {
+  text-align: center;
+  font-size: 34px;
+  margin: auto;
+  margin-bottom: 20px;
+}
+
+.search-box {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.search-box input {
+  width: 320px;
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fbfbfc;  
+}
+
+.search-box button {
+  padding: 12px 22px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(#6b7280, #374151);
+  color: white;
+  cursor: pointer;
+}
+
+.search-back-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: bold;
+  padding: 0 15px !important;
+}
+
+
+.recent-searches {
+  margin-bottom: 20px;
+}
+
+.recent-searches h3 {
+  font-weight: 600;
+  font-size: 22px;
+  margin-bottom: 6px;
+}
+
+.recent-item {
+  margin-right: 12px;
+  font-size: 18px;
+  border: 0px solid #111;
+  border-radius: 8px;
+  background: #d6d7da;
+  padding: 4px 8px;
+}
+
+.recent-item span {
+  cursor: pointer;
+  padding: 2px 6px;
+}
+
+.recent-item button {
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+
+.recent-item button:hover {
+  background: #64748b;
+  color: white;
+  border-radius: 12px;
+}
+
+.results-list {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card-section {
+  background: #d1d4db;
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.dashed {
+  border: 2px dashed #94a3b8;
+  border-radius: 12px;
+}
+
+.card-section h2 {
+  font-size: 1rem;
+  color: #6b7280;
+  padding-top: 10px;
+  padding-left: 10px;
+  padding-bottom: 10px;
+  border-bottom: 2px solid #7c7d80;
+  border-radius: 2px;
+  font-weight: 800;
+}
+
+.visual-insights {
+  display: flex;
+  justify-content: center;
+  padding: 10px;
+}
+
+.main-portrait {
+  width: 200px;
+  border-radius: 14px;
+  box-shadow: 10px 10px rgba(0, 0, 0, 0.2);
+}
+
+.result-item {
+  background: #d1d5db;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 5px;
+  margin-bottom: 5px;
+}
+
+.result-item h3 {
+  font-size: 16px;
+  margin: 0;
+  font-weight: 800;
+  margin-bottom: 5px;
+}
+
+.result-meta {
+  display: flex;
+  gap: 15px;
+  margin-top: 15px;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.badge {
+  background: #949597 ;
+  color: white;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  
+}
+
+.resource-link {
+  display:list-item;
+  padding: 10px;
+  border-radius: 8px;
+  background: #c6c7c9;
+  font-size: 14px;
+  color: #111111;
+  font-weight: 650;
+  border: 2px solid #c9c6c6;
+  margin-bottom: 15px;
+  font-family: 'Gill Sans', 'Gill Sans MT', Calibri, 'Trebuchet MS', sans-serif;
+}
+
+.results-wrapper {
+  margin-top: 20px;
+  padding: 24px;
+  border: 0.025rem solid #94a3b8;
+  border-radius: 16px;
+  
+}
+.source{
+  display:flex;
+  align-items: center;
+  margin-top: 15px;
+  font-size: 12px;
+  font-weight: 650;
+  color: #111;
+  border: 2px solid #e9e3e3;
+  padding: 4px 6px;
+  border-radius: 6px;
+  text-decoration: none;
+}
+.empty-state {
+  background: #e5e7eb;
+  padding: 30px;
+  border-radius: 16px;
+  text-align: center;
+  color: #374151;
+}
+.ai-summary-card {
+  background: #eef2f7;
+}
+
+.ai-summary-text {
+  font-size: 15px;
+  line-height: 1.6;
+  color: #1f2937;
+  margin: 12px 10px 16px;
+  font-weight: 500;
+}
+
+.ai-citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: 10px;
+}
+
+.citation-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.citation-chip {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #e5e7eb;
+  color: #111;
+  text-decoration: none;
+  border: 1px solid #cbd5e1;
+}
+
+.citation-chip:hover {
+  background: #d1d5db;
+}
+
+.citation-chip.muted {
+  opacity: 0.7;
+  cursor: default;
+}
