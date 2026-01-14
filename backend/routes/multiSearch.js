@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import { aggregateSources } from "../services/sourceAggregator.js";
-import { generateAISummary } from "../services/geminiSummary.js";
+import { generateAISummary } from "../services/aiSummary.js";
 
 dotenv.config();
 
@@ -86,7 +86,6 @@ router.post("/", async (req, res) => {
       category: doc.category
     }))
   ];
-
   const rankedResults = rankResults(combined, query);
 
   const groupedResults = {
@@ -121,15 +120,16 @@ router.post("/", async (req, res) => {
   ];
 
   return res.json({
-    query,
-    total: rankedResults.length,
-    images,
-    profile: groupedResults.profile,
-    records: groupedResults.records,
-    auxiliary: groupedResults.auxiliary,
-    summary: aiSummary,
-    summarySources: aiSources
-  });
+  query,
+  total: rankedResults.length,
+  images,
+  profile: groupedResults.profile,
+  records: groupedResults.records,
+  auxiliary: groupedResults.auxiliary,
+  aiSummary,
+  summarySources: aiSources
+});
+
 });
 
 export default router;

@@ -16,7 +16,7 @@ const MultiSearchPage = () => {
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem("recent-searches")) || [];
     setRecent(saved);
-  }, []);
+  }, []); 
 
   // Persist search state on change
   useEffect(() => {
@@ -123,39 +123,41 @@ const MultiSearchPage = () => {
         <div className="results-wrapper">
           <div className="results-list">
             {/* AI SUMMARY */}
-            {data.summary && (
-              <div className="card-section ai-summary-card dashed">
-                <h2>AI SUMMARY</h2>
+            {/* AI SUMMARY */}
+{data.aiSummary && (
+  <div className="card-section ai-summary-card dashed">
+    <h2>AI SUMMARY</h2>
 
-                <p className="ai-summary-text">
-                  {data.summary}
-                </p>
+    <p className="ai-summary-text">
+      {data.aiSummary}
+    </p>
 
-                {data.summarySources?.length > 0 && (
-                  <div className="ai-citations">
-                    <span className="citation-label">Sources:</span>
+    {data.summarySources?.length > 0 && (
+      <div className="ai-citations">
+        <span className="citation-label">Sources:</span>
 
-                    {data.summarySources.map((src, index) => (
-                      src.url ? (
-                        <a
-                          key={index}
-                          href={src.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="citation-chip"
-                        >
-                          {src.title}
-                        </a>
-                      ) : (
-                        <span key={index} className="citation-chip muted">
-                          {src.title}
-                        </span>
-                      )
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+        {data.summarySources.map((src, index) => (
+          src.url ? (
+            <a
+              key={index}
+              href={src.url}
+              target="_blank"
+              rel="noreferrer"
+              className="citation-chip"
+            >
+              {src.title}
+            </a>
+          ) : (
+            <span key={index} className="citation-chip muted">
+              {src.title}
+            </span>
+          )
+        ))}
+      </div>
+    )}
+  </div>
+)}
+
 
             {/* VISUAL INSIGHTS */}
             {data.images?.length > 0 && (
