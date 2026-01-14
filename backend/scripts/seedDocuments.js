@@ -28,7 +28,7 @@ await Document.insertMany([
     metadata: { topic: "Companies" }
   },
   {
-    text: "Ahmed Khatri is the CEO of FAUS Group.",
+    text: "Ahmed Khatri p.",
     source: "MongoDB",
     entityKey: "Ahmed Khatri",
     metadata: { topic: "Ahmed Khatri" }
