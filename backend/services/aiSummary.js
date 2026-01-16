@@ -22,3 +22,4 @@ Avoid assumptions. Be factual.
   const result = await model.generateContent(prompt);
   return result.response.text();
 }
+console.log("Gemini key loaded:", !!process.env.GEMINI_API_KEY);
