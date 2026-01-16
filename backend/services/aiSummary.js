@@ -1,65 +1,61 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import OpenAI from "openai";
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 export async function generateAISummary(query, sources) {
   try {
+    // Safety checks
     if (!query || !sources || sources.length === 0) {
       console.warn("AI summary skipped: insufficient data");
-      return null;
+      return "AI summary not available";
     }
 
-    const model = genAI.getGenerativeModel({
-      model: "gemini-1.5-flash"
-    });
-
-    const facts = sources.slice(0, 5).map(s =>
-      `• ${s.title || s.text || "Unknown"} (${s.source || "source"})`
-    ).join("\n");
+    // Prepare facts (limit to avoid token overflow)
+    const facts = sources
+      .slice(0, 6)
+      .map((s, i) => {
+        return `${i + 1}. ${s.content || s.text || s.title || "Unknown fact"} (${s.source || "source"})`;
+      })
+      .join("\n");
 
     const prompt = `
 You are an AI research assistant like DeepSearch AI.
 
 Search Query:
-${query}
+"${query}"
 
 Facts:
 ${facts}
 
+Task:
 Write a factual, neutral summary in 3–4 sentences.
+Avoid assumptions. Do not add new information.
 `;
 
-    const result = await model.generateContent(prompt);
+    const response = await openai.chat.completions.create({
+      model: "gpt-3.5-turbo",
+      messages: [
+        { role: "system", content: "You summarize factual data clearly and professionally." },
+        { role: "user", content: prompt },
+      ],
+      temperature: 0.3,
+      max_tokens: 160,
+    });
 
-    // 🔴 SAFE EXTRACTION (THIS IS THE KEY)
-    const response = result?.response;
+    const summary =
+      response?.choices?.[0]?.message?.content?.trim();
 
-// ✅ Preferred helper (Gemini SDK)
-if (typeof response?.text === "function") {
-  const text = response.text().trim();
-  if (text) return text;
-}
+    if (!summary) {
+      console.error("OpenAI returned empty summary");
+      return "AI summary not available";
+    }
 
-// ✅ Fallback: manual parts merge
-const parts = response?.candidates?.[0]?.content?.parts;
-if (Array.isArray(parts)) {
-  const text = parts
-    .map(p => p.text)
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  if (text) return text;
-}
-
-console.error("Gemini returned no usable text");
-return null;
-
-
-    return text;
+    return summary;
 
   } catch (err) {
-    console.error("Gemini summary error:", err.message);
-    return null;
+    console.error("OpenAI summary error:", err.message);
+    return "AI summary not available";
   }
 }
