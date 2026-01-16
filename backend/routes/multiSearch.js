@@ -105,34 +105,35 @@ router.post("/", async (req, res) => {
   let aiSummary = null;
 
   try {
-   aiSummary = await generateAISummary(query, aiSources);
+    aiSummary = await generateAISummary(query, aiSources);
 
-if (!aiSummary || typeof aiSummary !== "string") {
-  console.warn("AI summary empty or invalid");
-  aiSummary = null;
-} else {
-  console.log("AI Summary:", aiSummary.slice(0, 100));
-}
+
+    if (!aiSummary || typeof aiSummary !== "string") {
+      console.warn("AI summary empty or invalid");
+      aiSummary = "AI summary not available";
+    } else {
+      console.log("AI Summary:", aiSummary.slice(0, 100));
+    }
 
   } catch (err) {
     console.error("AI summary failed:", err.message);
     aiSummary = null;
   }
-  
+
   const images = [
     ...new Set(rankedResults.flatMap(r => r.images || []).filter(Boolean))
   ];
 
   return res.json({
-  query,
-  total: rankedResults.length,
-  images,
-  profile: groupedResults.profile,
-  records: groupedResults.records,
-  auxiliary: groupedResults.auxiliary,
-  summary: aiSummary,
-  summarySources: aiSources
-});
+    query,
+    total: rankedResults.length,
+    images,
+    profile: groupedResults.profile,
+    records: groupedResults.records,
+    auxiliary: groupedResults.auxiliary,
+    summary: aiSummary,
+    summarySources: aiSources
+  });
 
 });
 
