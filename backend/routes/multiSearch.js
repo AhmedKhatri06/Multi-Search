@@ -105,13 +105,20 @@ router.post("/", async (req, res) => {
   let aiSummary = null;
 
   try {
-    aiSummary = await generateAISummary(query, aiSources);
-    console.log("AI Summary:", aiSummary?.slice(0, 100));
+   aiSummary = await generateAISummary(query, aiSources);
+
+if (!aiSummary || typeof aiSummary !== "string") {
+  console.warn("AI summary empty or invalid");
+  aiSummary = null;
+} else {
+  console.log("AI Summary:", aiSummary.slice(0, 100));
+}
+
   } catch (err) {
     console.error("AI summary failed:", err.message);
     aiSummary = null;
   }
-
+  
   const images = [
     ...new Set(rankedResults.flatMap(r => r.images || []).filter(Boolean))
   ];
