@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import { aggregateSources } from "../services/sourceAggregator.js";
-import { generateAISummary } from "../services/aiSummary.js";
 
 dotenv.config();
 
