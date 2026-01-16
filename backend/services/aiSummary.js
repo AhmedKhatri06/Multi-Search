@@ -33,20 +33,28 @@ Write a factual, neutral summary in 3–4 sentences.
 
     // 🔴 SAFE EXTRACTION (THIS IS THE KEY)
     const response = result?.response;
-    const candidates = response?.candidates;
 
-    if (!candidates || !candidates.length) {
-      console.error("Gemini returned no candidates");
-      return null;
-    }
+// ✅ Preferred helper (Gemini SDK)
+if (typeof response?.text === "function") {
+  const text = response.text().trim();
+  if (text) return text;
+}
 
-    const text =
-      candidates[0]?.content?.parts?.[0]?.text?.trim();
+// ✅ Fallback: manual parts merge
+const parts = response?.candidates?.[0]?.content?.parts;
+if (Array.isArray(parts)) {
+  const text = parts
+    .map(p => p.text)
+    .filter(Boolean)
+    .join(" ")
+    .trim();
 
-    if (!text) {
-      console.error("Gemini returned empty text");
-      return null;
-    }
+  if (text) return text;
+}
+
+console.error("Gemini returned no usable text");
+return null;
+
 
     return text;
 
