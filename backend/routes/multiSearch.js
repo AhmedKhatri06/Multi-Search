@@ -105,10 +105,7 @@ router.post("/", async (req, res) => {
   let aiSummary = null;
 
   try {
-    aiSummary = await generateAISummary({
-      query,
-      sources: aiSources
-    });
+    aiSummary = await generateAISummary(query, aiSources);
     console.log("AI Summary:", aiSummary?.slice(0, 100));
   } catch (err) {
     console.error("AI summary failed:", err.message);
@@ -126,7 +123,7 @@ router.post("/", async (req, res) => {
   profile: groupedResults.profile,
   records: groupedResults.records,
   auxiliary: groupedResults.auxiliary,
-  aiSummary,
+  summary: aiSummary,
   summarySources: aiSources
 });
 
