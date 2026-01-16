@@ -10,7 +10,7 @@ import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
 import multiSearchRoute from "./routes/multiSearch.js";
-
+import internetSearch from "./routes/internetSearch.js";
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -24,7 +24,7 @@ mongoose.connect(process.env.MONGO_URI)
 
 app.use("/api/multi-search", multiSearchRoute);
 app.use("/images", express.static(path.join(process.cwd(), "images")));
-
+app.use("/api/search/internet", internetSearch);
 app.get("/", (req, res) => {
   res.send("Backend is running 🚀");
 });
