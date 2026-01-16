@@ -93,19 +93,30 @@ router.post("/", async (req, res) => {
     records: rankedResults.filter(r => r.type === "RECORD"),
     auxiliary: rankedResults.filter(r => r.type === "AUX")
   };
+  // ✅ Build clean AI-ready sources
+  const aiSources = [
+    ...groupedResults.profile.map(p => ({
+      content: p.text,
+      source: p.source
+    })),
+    ...groupedResults.records.map(r => ({
+      content: r.text,
+      source: r.source
+    })),
+    ...groupedResults.auxiliary.map(a => ({
+      content: a.text || a.description || a.title,
+      source: a.source
+    }))
+  ].filter(s => s.content);
+
 
   // 🔗 Aggregate sources
-  const aiSources = await aggregateSources({
-    query,
-    profile: groupedResults.profile,
-    records: groupedResults.records,
-    auxiliary: groupedResults.auxiliary
-  });
+
 
   let aiSummary = null;
 
   try {
-    aiSummary = await generateAISummary(query, aiSources);
+    const aiSummary = await generateAISummary(query, aiSources);
 
 
     if (!aiSummary || typeof aiSummary !== "string") {
