@@ -16,7 +16,7 @@ const MultiSearchPage = () => {
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem("recent-searches")) || [];
     setRecent(saved);
-  }, []); 
+  }, []);
 
   // Persist search state on change
   useEffect(() => {
@@ -65,8 +65,6 @@ const MultiSearchPage = () => {
 
   return (
     <div className="container">
-
-
       <h1>Multi-Search</h1>
       <div className="search-box">
         {hasSearched && (
@@ -122,7 +120,13 @@ const MultiSearchPage = () => {
       {data && (
         <div className="results-wrapper">
           <div className="results-list">
-            {/* AI SUMMARY */}
+            {/* Loading AI Summary */}
+            {loading && (
+  <div className="card-section dashed">
+    <p>Generating AI summary...</p>
+  </div>
+)}
+
             {/* AI SUMMARY */}
 {data.aiSummary && (
   <div className="card-section ai-summary-card dashed">

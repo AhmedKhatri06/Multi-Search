@@ -306,3 +306,29 @@ h1 {
     padding: 3px 8px;
   }
 }
+.ai-summary-card {
+  background: #fafafa;
+}
+
+.ai-summary-text {
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.ai-citations {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.citation-chip {
+  padding: 4px 8px;
+  border-radius: 12px;
+  background: #eee;
+  font-size: 12px;
+}
+
+.citation-chip.muted {
+  opacity: 0.6;
+}
