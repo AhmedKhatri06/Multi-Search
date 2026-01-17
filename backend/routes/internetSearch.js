@@ -25,13 +25,36 @@ router.get("/", async (req, res) => {
       }
     );
 
-    const duckDuckGoData = {
-      source: "DuckDuckGo",
-      abstract: ddgResponse.data.AbstractText || "",
-      relatedTopics: (ddgResponse.data.RelatedTopics || []).slice(0, 5)
-    };
+    const ddgRawTopics = ddgResponse.data.RelatedTopics || [];
+const normalizedDDGResults = [];
 
-   // 2️⃣ Wikipedia Search (Search → Summary approach)
+function extractDDG(items) {
+  for (const item of items) {
+    // Valid result
+    if (item.Text && item.FirstURL) {
+      normalizedDDGResults.push({
+        title: item.Text,
+        url: item.FirstURL,
+        source: "DuckDuckGo"
+      });
+    }
+
+    // Nested category
+    if (item.Topics) {
+      extractDDG(item.Topics);
+    }
+  }
+}
+
+extractDDG(ddgRawTopics);
+
+const duckDuckGoData = {
+  source: "DuckDuckGo",
+  abstract: ddgResponse.data.AbstractText || "",
+  results: normalizedDDGResults.slice(0, 5)
+};
+
+
     // 2️⃣ Wikipedia Search (Robust & Production Safe)
 let wikipediaData = null;
 
