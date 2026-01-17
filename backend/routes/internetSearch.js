@@ -78,6 +78,17 @@ try {
   console.error("Wikipedia error:", error.message);
   wikipediaData = null;
 }
+// 3️⃣ Fallback: Use DuckDuckGo if Wikipedia is null
+if (!wikipediaData) {
+  wikipediaData = {
+    source: "Wikipedia (fallback)",
+    title: query,
+    description:
+      duckDuckGoData.abstract ||
+      "No detailed Wikipedia page found for this query.",
+    pageUrl: null
+  };
+}
 
 
 
