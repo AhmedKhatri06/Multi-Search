@@ -3,6 +3,7 @@ import axios from "axios";
 
 const router = express.Router();
 
+
 router.get("/", async (req, res) => {
   const query = req.query.q;
 
@@ -30,22 +31,45 @@ router.get("/", async (req, res) => {
       relatedTopics: (ddgResponse.data.RelatedTopics || []).slice(0, 5)
     };
 
-    // 2️⃣ Wikipedia Search
-    let wikipediaData = null;
-    try {
-      const wikiResponse = await axios.get(
-        `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`
-      );
+   // 2️⃣ Wikipedia Search (Search → Summary approach)
+let wikipediaData = null;
 
-      wikipediaData = {
-        source: "Wikipedia",
-        title: wikiResponse.data.title,
-        description: wikiResponse.data.extract,
-        pageUrl: wikiResponse.data.content_urls?.desktop?.page
-      };
-    } catch {
-      wikipediaData = null;
+try {
+  // Step 1: Search Wikipedia
+  const searchResponse = await axios.get(
+    "https://en.wikipedia.org/w/api.php",
+    {
+      params: {
+        action: "query",
+        list: "search",
+        srsearch: query,
+        format: "json",
+      },
     }
+  );
+
+  const searchResults = searchResponse.data?.query?.search;
+
+  if (searchResults && searchResults.length > 0) {
+    const pageTitle = searchResults[0].title;
+
+    // Step 2: Get page summary
+    const pageResponse = await axios.get(
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`
+    );
+
+    wikipediaData = {
+      source: "Wikipedia",
+      title: pageResponse.data.title,
+      description: pageResponse.data.extract,
+      pageUrl: pageResponse.data.content_urls?.desktop?.page
+    };
+  }
+} catch (error) {
+  console.error("Wikipedia search failed:", error.message);
+  wikipediaData = null;
+}
+
 
     // Final response
     res.json({
