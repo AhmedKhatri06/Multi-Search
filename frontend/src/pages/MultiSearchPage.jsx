@@ -63,6 +63,7 @@ const MultiSearchPage = () => {
     }
   };
 
+
   return (
     <div className="container">
       <h1>Multi-Search</h1>
@@ -120,49 +121,6 @@ const MultiSearchPage = () => {
       {data && (
         <div className="results-wrapper">
           <div className="results-list">
-            {/* Loading AI Summary */}
-            {loading && (
-              <div className="card-section dashed">
-                <p>Generating AI summary...</p>
-              </div>
-            )}
-
-            {/* AI SUMMARY */}
-            {data.aiSummary && (
-              <div className="card-section ai-summary-card dashed">
-                <h2>AI SUMMARY</h2>
-
-                <p className="ai-summary-text">
-                  {data.aiSummary}
-                </p>
-
-                {data.aiSummarySources?.length > 0 && (
-                  <div className="ai-citations">
-                    <span className="citation-label">Sources:</span>
-
-                    {data.aiSummarySources.map((src, index) => (
-                      src.url ? (
-                        <a
-                          key={index}
-                          href={src.url}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="citation-chip"
-                        >
-                          {src.title}
-                        </a>
-                      ) : (
-                        <span key={index} className="citation-chip muted">
-                          {src.title}
-                        </span>
-                      )
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-
-
             {/* VISUAL INSIGHTS */}
             {data.images?.length > 0 && (
               <div className="card-section dashed">
