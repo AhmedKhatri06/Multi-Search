@@ -68,14 +68,14 @@ router.post("/", async (req, res) => {
       });
     }
 
-    // DuckDuckGo related topics
-    if (internetData.duckDuckGo?.relatedTopics) {
-      internetData.duckDuckGo.relatedTopics.forEach((item, index) => {
+    // DuckDuckGo results
+    if (internetData.duckDuckGo?.results) {
+      internetData.duckDuckGo.results.forEach((item, index) => {
         internetResults.push({
           id: `ddg-${index}`,
-          text: item.Text,
-          title: item.Text,
-          url: item.FirstURL,
+          text: item.title,
+          title: item.title,
+          url: item.url,
           source: "Internet",
           provider: "DuckDuckGo",
           type: "AUX",
