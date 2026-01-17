@@ -1,11 +1,7 @@
 import express from "express";
-import fs from "fs";
-import path from "path";
 import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
-import { aggregateSources } from "../services/sourceAggregator.js";
-import { generateAISummary } from "../services/aiSummary.js";
 import axios from "axios";
 
 dotenv.config();
@@ -47,60 +43,49 @@ router.post("/", async (req, res) => {
   // SQLite → PROFILE
   const sqliteResults = await sqliteSearch(query);
 
-  // JSON → AUXILIARY
-  const filePath = path.resolve("data/companyData.json");
-  const fileData = JSON.parse(fs.readFileSync(filePath));
+  // Internet Search (DuckDuckGo + Wikipedia)
+  let internetResults = [];
 
-  const jsonResults = fileData.filter(item => {
-    const titleMatch = item.title?.toLowerCase().includes(query.toLowerCase());
-    const descMatch = item.description?.toLowerCase().includes(query.toLowerCase());
-    return titleMatch || descMatch;
-  });
+  try {
+    const internetResponse = await axios.get(
+      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(query)}`
+    );
 
-  // Internet Search
-  // 🌐 Internet Search (DuckDuckGo + Wikipedia)
-let internetResults = [];
+    const internetData = internetResponse.data;
 
-try {
-  const internetResponse = await axios.get(
-    `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(query)}`
-  );
-
-  const internetData = internetResponse.data;
-
-  // Wikipedia result
-  if (internetData.wikipedia) {
-    internetResults.push({
-      id: `wiki-${query}`,
-      text: internetData.wikipedia.description || internetData.wikipedia.title,
-      title: internetData.wikipedia.title,
-      description: internetData.wikipedia.description,
-      url: internetData.wikipedia.pageUrl,
-      source: "Internet",
-      provider: "Wikipedia",
-      type: "AUX",
-      priority: 3
-    });
-  }
-
-  // DuckDuckGo related topics
-  if (internetData.duckDuckGo?.relatedTopics) {
-    internetData.duckDuckGo.relatedTopics.forEach((item, index) => {
+    // Wikipedia result
+    if (internetData.wikipedia) {
       internetResults.push({
-        id: `ddg-${index}`,
-        text: item.Text,
-        title: item.Text,
-        url: item.FirstURL,
+        id: `wiki-${query}`,
+        text: internetData.wikipedia.description || internetData.wikipedia.title,
+        title: internetData.wikipedia.title,
+        description: internetData.wikipedia.description,
+        url: internetData.wikipedia.pageUrl,
         source: "Internet",
-        provider: "DuckDuckGo",
+        provider: "Wikipedia",
         type: "AUX",
         priority: 3
       });
-    });
+    }
+
+    // DuckDuckGo related topics
+    if (internetData.duckDuckGo?.relatedTopics) {
+      internetData.duckDuckGo.relatedTopics.forEach((item, index) => {
+        internetResults.push({
+          id: `ddg-${index}`,
+          text: item.Text,
+          title: item.Text,
+          url: item.FirstURL,
+          source: "Internet",
+          provider: "DuckDuckGo",
+          type: "AUX",
+          priority: 3
+        });
+      });
+    }
+  } catch (error) {
+    console.error("Internet search failed:", error.message);
   }
-} catch (error) {
-  console.error("Internet search failed:", error.message);
-}
 
 
   const combined = [
@@ -119,18 +104,6 @@ try {
       type: "PROFILE",
       priority: 1,
       images: [doc.image].filter(Boolean)
-    })),
-
-    ...jsonResults.map(doc => ({
-      id: doc.id,
-      text: `${doc.title} - ${doc.description}`,
-      title: doc.title,
-      description: doc.description,
-      url: doc.url,
-      type: "AUX",
-      source: doc.source,
-      priority: 3,
-      category: doc.category
     })),
     ...internetResults
   ];
