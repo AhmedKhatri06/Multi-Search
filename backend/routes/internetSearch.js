@@ -32,6 +32,7 @@ router.get("/", async (req, res) => {
     };
 
    // 2️⃣ Wikipedia Search (Search → Summary approach)
+    // 2️⃣ Wikipedia Search (Robust & Production Safe)
 let wikipediaData = null;
 
 try {
@@ -45,6 +46,9 @@ try {
         srsearch: query,
         format: "json",
       },
+      headers: {
+        "User-Agent": "MultiSearchApp/1.0 (contact@example.com)"
+      }
     }
   );
 
@@ -55,7 +59,12 @@ try {
 
     // Step 2: Get page summary
     const pageResponse = await axios.get(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`
+      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`,
+      {
+        headers: {
+          "User-Agent": "MultiSearchApp/1.0 (contact@example.com)"
+        }
+      }
     );
 
     wikipediaData = {
@@ -66,9 +75,10 @@ try {
     };
   }
 } catch (error) {
-  console.error("Wikipedia search failed:", error.message);
+  console.error("Wikipedia error:", error.message);
   wikipediaData = null;
 }
+
 
 
     // Final response
