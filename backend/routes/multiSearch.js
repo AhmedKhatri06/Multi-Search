@@ -6,6 +6,7 @@ import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import { aggregateSources } from "../services/sourceAggregator.js";
 import { generateAISummary } from "../services/aiSummary.js";
+import axios from "axios";
 
 dotenv.config();
 
@@ -56,6 +57,52 @@ router.post("/", async (req, res) => {
     return titleMatch || descMatch;
   });
 
+  // Internet Search
+  // 🌐 Internet Search (DuckDuckGo + Wikipedia)
+let internetResults = [];
+
+try {
+  const internetResponse = await axios.get(
+    `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(query)}`
+  );
+
+  const internetData = internetResponse.data;
+
+  // Wikipedia result
+  if (internetData.wikipedia) {
+    internetResults.push({
+      id: `wiki-${query}`,
+      text: internetData.wikipedia.description || internetData.wikipedia.title,
+      title: internetData.wikipedia.title,
+      description: internetData.wikipedia.description,
+      url: internetData.wikipedia.pageUrl,
+      source: "Internet",
+      provider: "Wikipedia",
+      type: "AUX",
+      priority: 3
+    });
+  }
+
+  // DuckDuckGo related topics
+  if (internetData.duckDuckGo?.relatedTopics) {
+    internetData.duckDuckGo.relatedTopics.forEach((item, index) => {
+      internetResults.push({
+        id: `ddg-${index}`,
+        text: item.Text,
+        title: item.Text,
+        url: item.FirstURL,
+        source: "Internet",
+        provider: "DuckDuckGo",
+        type: "AUX",
+        priority: 3
+      });
+    });
+  }
+} catch (error) {
+  console.error("Internet search failed:", error.message);
+}
+
+
   const combined = [
     ...mongoResults.map(doc => ({
       id: doc._id,
@@ -84,7 +131,8 @@ router.post("/", async (req, res) => {
       source: doc.source,
       priority: 3,
       category: doc.category
-    }))
+    })),
+    ...internetResults
   ];
   const rankedResults = rankResults(combined, query);
 
@@ -93,43 +141,6 @@ router.post("/", async (req, res) => {
     records: rankedResults.filter(r => r.type === "RECORD"),
     auxiliary: rankedResults.filter(r => r.type === "AUX")
   };
-  // ✅ Build clean AI-ready sources
-  const aiSources = [
-    ...groupedResults.profile.map(p => ({
-      content: p.text,
-      source: p.source
-    })),
-    ...groupedResults.records.map(r => ({
-      content: r.text,
-      source: r.source
-    })),
-    ...groupedResults.auxiliary.map(a => ({
-      content: a.text || a.description || a.title,
-      source: a.source
-    }))
-  ].filter(s => s.content);
-
-
-  // 🔗 Aggregate sources
-
-
-  let aiSummary = null;
-
-  try {
-    const aiSummary = await generateAISummary(query, aiSources);
-
-
-    if (!aiSummary || typeof aiSummary !== "string") {
-      console.warn("AI summary empty or invalid");
-      aiSummary = "AI summary not available";
-    } else {
-      console.log("AI Summary:", aiSummary.slice(0, 100));
-    }
-
-  } catch (err) {
-    console.error("AI summary failed:", err.message);
-    aiSummary = null;
-  }
 
   const images = [
     ...new Set(rankedResults.flatMap(r => r.images || []).filter(Boolean))
@@ -142,8 +153,6 @@ router.post("/", async (req, res) => {
     profile: groupedResults.profile,
     records: groupedResults.records,
     auxiliary: groupedResults.auxiliary,
-    summary: aiSummary,
-    summarySources: aiSources
   });
 
 });
