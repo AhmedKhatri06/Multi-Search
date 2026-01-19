@@ -32,9 +32,6 @@ const MultiSearchPage = () => {
 
   const search = async (searchQuery = query) => {
     if (!searchQuery.trim()) return;
-    const result = await res.json();
-    console.log("SEARCH RESPONSE:", result);
-    setData(result);
 
     try {
       setLoading(true);
@@ -46,7 +43,7 @@ const MultiSearchPage = () => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query }),
+        body: JSON.stringify({ query: searchQuery }),
       });
 
       const result = await res.json();
