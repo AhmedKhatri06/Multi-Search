@@ -147,9 +147,7 @@ router.get("/", async (req, res) => {
   const normalizedQuery = query.toLowerCase();
 
   try {
-    /* ================================
-       1️⃣ DuckDuckGo Search (Filtered)
-    ================================= */
+    // DuckDuckGo Search (Filtered)
     const ddgResponse = await axios.get("https://api.duckduckgo.com/", {
       params: {
         q: query,
@@ -196,7 +194,7 @@ router.get("/", async (req, res) => {
       source: "DuckDuckGo",
       results: normalizedDDGResults.slice(0, 5)
     };
-
+    console.log("DDG results count:", normalizedDDGResults.length);
     // Wikipedia Search 
     let wikipediaData = null;
 
@@ -269,6 +267,6 @@ router.get("/", async (req, res) => {
     return res.status(500).json({ error: "Internet search failed" });
   }
 });
-console.log("DDG results count:", normalizedDDGResults.length);
+
 
 export default router;
