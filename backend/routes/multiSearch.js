@@ -126,6 +126,10 @@ router.post("/", async (req, res) => {
     profile: groupedResults.profile,
     records: groupedResults.records,
     auxiliary: groupedResults.auxiliary,
+    rankedSources: {
+      wikipedia: internetResults.find(r => r.provider === "Wikipedia"),
+      duckDuckGo: internetResults.filter(r => r.provider === "DuckDuckGo")
+    }
   });
 
 });
