@@ -138,6 +138,8 @@ import axios from "axios";
 const router = express.Router();
 
 router.get("/", async (req, res) => {
+  let normalizedDDGResults = [];
+
   const query = req.query.q;
 
   if (!query) {
@@ -147,6 +149,7 @@ router.get("/", async (req, res) => {
   const normalizedQuery = query.toLowerCase();
 
   try {
+    // DuckDuckGo Search (Filtered)
     // DuckDuckGo Search (Filtered)
     const ddgResponse = await axios.get("https://api.duckduckgo.com/", {
       params: {
@@ -159,20 +162,15 @@ router.get("/", async (req, res) => {
     });
 
     const ddgRawTopics = ddgResponse.data.RelatedTopics || [];
-    const normalizedDDGResults = [];
 
     function extractDDG(items) {
       for (const item of items) {
-        // Valid result
         if (!item.Text || !item.FirstURL) continue;
 
         const text = item.Text.toLowerCase();
         const firstName = normalizedQuery.split(" ")[0];
 
-        if (
-          text.includes(normalizedQuery) ||
-          text.includes(firstName)
-        ) {
+        if (text.includes(normalizedQuery) || text.includes(firstName)) {
           normalizedDDGResults.push({
             title: item.Text,
             url: item.FirstURL,
@@ -180,8 +178,6 @@ router.get("/", async (req, res) => {
           });
         }
 
-
-        // Nested categories
         if (item.Topics) {
           extractDDG(item.Topics);
         }
@@ -194,7 +190,9 @@ router.get("/", async (req, res) => {
       source: "DuckDuckGo",
       results: normalizedDDGResults.slice(0, 5)
     };
+
     console.log("DDG results count:", normalizedDDGResults.length);
+
     // Wikipedia Search 
     let wikipediaData = null;
 
@@ -255,7 +253,7 @@ router.get("/", async (req, res) => {
       wikipediaData = null;
     }
 
-//       FINAL RESPONSE
+    //       FINAL RESPONSE
     return res.json({
       query,
       duckDuckGo: duckDuckGoData,
@@ -267,6 +265,23 @@ router.get("/", async (req, res) => {
     return res.status(500).json({ error: "Internet search failed" });
   }
 });
+function withTimeout(promise, ms = 3000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Timeout")), ms)
+    )
+  ]);
+}
+async function retry(fn, retries = 2) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (retries === 0) throw err;
+    return retry(fn, retries - 1);
+  }
+}
+
 
 
 export default router;
