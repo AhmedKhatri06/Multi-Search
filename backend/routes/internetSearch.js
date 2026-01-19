@@ -152,7 +152,7 @@ router.get("/", async (req, res) => {
     ================================= */
     const ddgResponse = await axios.get("https://api.duckduckgo.com/", {
       params: {
-        q: `${query} profile`,
+        q: query,
         format: "json",
         no_redirect: 1,
         no_html: 1
@@ -166,17 +166,21 @@ router.get("/", async (req, res) => {
     function extractDDG(items) {
       for (const item of items) {
         // Valid result
-       const text = item.Text.toLowerCase();
-       if (
-  text.includes(normalizedQuery) ||
-  text.includes(normalizedQuery.split(" ")[0]) // first name fallback
-) {
-  normalizedDDGResults.push({
-    title: item.Text,
-    url: item.FirstURL,
-    source: "DuckDuckGo"
-  });
-}
+        if (!item.Text || !item.FirstURL) continue;
+
+        const text = item.Text.toLowerCase();
+        const firstName = normalizedQuery.split(" ")[0];
+
+        if (
+          text.includes(normalizedQuery) ||
+          text.includes(firstName)
+        ) {
+          normalizedDDGResults.push({
+            title: item.Text,
+            url: item.FirstURL,
+            source: "DuckDuckGo"
+          });
+        }
 
 
         // Nested categories
@@ -253,9 +257,7 @@ router.get("/", async (req, res) => {
       wikipediaData = null;
     }
 
-    /* ================================
-       FINAL RESPONSE
-    ================================= */
+//       FINAL RESPONSE
     return res.json({
       query,
       duckDuckGo: duckDuckGoData,
@@ -267,5 +269,6 @@ router.get("/", async (req, res) => {
     return res.status(500).json({ error: "Internet search failed" });
   }
 });
+console.log("DDG results count:", normalizedDDGResults.length);
 
 export default router;
