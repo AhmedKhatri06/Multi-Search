@@ -31,34 +31,34 @@ const MultiSearchPage = () => {
   };
 
   const search = async (searchQuery = query) => {
-    if (!searchQuery.trim()) return
+    if (!searchQuery.trim()) return;
+
     try {
-      const internetRes = await fetch(
-        `${API_URL}/api/internet-search?q=${encodeURIComponent(searchQuery)}`
-      );
+      setLoading(true);
+      setQuery(searchQuery);
+      setHasSearched(true);
 
-      if (!internetRes.ok) throw new Error("Internet failed");
+      const res = await fetch(`${API_URL}/api/multi-search`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ query: searchQuery }),
+      });
 
-      const internetData = await internetRes.json();
+      const result = await res.json();
+      setData(result);
 
-      setData(prev => ({
-        ...prev,
-        auxiliary: [
-          ...(internetData.duckDuckGo?.results || []),
-          ...(internetData.wikipedia
-            ? [{
-              title: internetData.wikipedia.title,
-              url: internetData.wikipedia.pageUrl,
-              source: "Wikipedia"
-            }]
-            : [])
-        ]
-      }));
+      const updated = [
+        searchQuery,
+        ...recent.filter(r => r !== searchQuery)
+      ].slice(0, 5);
 
+      setRecent(updated);
+      localStorage.setItem("recent-searches", JSON.stringify(updated));
     } catch (err) {
-      console.warn("Internet search skipped");
-    }
-    finally {
+      console.error(err);
+    } finally {
       setLoading(false);
     }
   };
