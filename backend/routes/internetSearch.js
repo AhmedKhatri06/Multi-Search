@@ -136,6 +136,11 @@ import express from "express";
 import axios from "axios";
 
 const router = express.Router();
+const SOURCE_WEIGHT = {
+  LOCAL: 3,
+  WIKIPEDIA: 2,
+  DUCKDUCKGO: 1
+};
 
 router.get("/", async (req, res) => {
   let normalizedDDGResults = [];
@@ -174,7 +179,8 @@ router.get("/", async (req, res) => {
           normalizedDDGResults.push({
             title: item.Text,
             url: item.FirstURL,
-            source: "DuckDuckGo"
+            source: "DuckDuckGo",
+            trustScore: SOURCE_WEIGHT.DUCKDUCKGO
           });
         }
 
@@ -244,7 +250,8 @@ router.get("/", async (req, res) => {
             source: "Wikipedia",
             title: pageResponse.data.title,
             description: pageResponse.data.extract,
-            pageUrl: pageResponse.data.content_urls?.desktop?.page
+            pageUrl: pageResponse.data.content_urls?.desktop?.page,
+            trustScore: SOURCE_WEIGHT.WIKIPEDIA
           };
         }
       }
@@ -256,8 +263,10 @@ router.get("/", async (req, res) => {
     //       FINAL RESPONSE
     return res.json({
       query,
-      duckDuckGo: duckDuckGoData,
-      wikipedia: wikipediaData
+       rankedSources: {
+    wikipedia: wikipediaData,
+    duckDuckGo: normalizedDDGResults
+  }
     });
 
   } catch (error) {
