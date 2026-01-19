@@ -45,6 +45,19 @@ const MultiSearchPage = () => {
         },
         body: JSON.stringify({ query: searchQuery }),
       });
+const localData = await localRes.json();
+
+// Internet resources ONLY
+const internetRes = await fetch(
+  `${API_URL}/api/internet-search?q=${encodeURIComponent(searchQuery)}`
+);
+const internetData = await internetRes.json();
+
+// Merge ONLY auxiliary
+setData({
+  ...localData,
+  auxiliary: internetData?.results || [],
+});
 
       const result = await res.json();
       setData(result);
