@@ -166,17 +166,18 @@ router.get("/", async (req, res) => {
     function extractDDG(items) {
       for (const item of items) {
         // Valid result
-        if (
-          item.Text &&
-          item.FirstURL &&
-          item.Text.toLowerCase().includes(normalizedQuery)
-        ) {
-          normalizedDDGResults.push({
-            title: item.Text,
-            url: item.FirstURL,
-            source: "DuckDuckGo"
-          });
-        }
+       const text = item.Text.toLowerCase();
+       if (
+  text.includes(normalizedQuery) ||
+  text.includes(normalizedQuery.split(" ")[0]) // first name fallback
+) {
+  normalizedDDGResults.push({
+    title: item.Text,
+    url: item.FirstURL,
+    source: "DuckDuckGo"
+  });
+}
+
 
         // Nested categories
         if (item.Topics) {
@@ -192,9 +193,7 @@ router.get("/", async (req, res) => {
       results: normalizedDDGResults.slice(0, 5)
     };
 
-    /* ================================
-       2️⃣ Wikipedia Search (Validated)
-    ================================= */
+    // Wikipedia Search 
     let wikipediaData = null;
 
     try {
