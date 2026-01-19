@@ -32,6 +32,9 @@ const MultiSearchPage = () => {
 
   const search = async (searchQuery = query) => {
     if (!searchQuery.trim()) return;
+    const result = await res.json();
+    console.log("SEARCH RESPONSE:", result);
+    setData(result);
 
     try {
       setLoading(true);
@@ -172,25 +175,44 @@ const MultiSearchPage = () => {
             )}
 
             {/* RESOURCES */}
-            {data.auxiliary?.length > 0 && (
+            {/* INTERNET RESULTS */}
+            {data?.rankedSources && (
               <div className="card-section dashed">
-                <h2>RESOURCES</h2>
-                {data.auxiliary.map(item => (
-                  <a
-                    key={item.id}
-                    href={item.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="resource-link"
-                  >
-                    <div>
-                      <span>{item.title}</span>
-                      <span className="source">Source: {item.source} - {item.url}</span>
+                <h2>INTERNET RESULTS</h2>
+
+                {/* Wikipedia */}
+                {data.rankedSources.wikipedia && (
+                  <div className="result-item">
+                    <h3>{data.rankedSources.wikipedia.title}</h3>
+                    <p>{data.rankedSources.wikipedia.description}</p>
+                    <a
+                      href={data.rankedSources.wikipedia.pageUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {data.rankedSources.wikipedia.pageUrl}
+                    </a>
+                    <div className="result-meta">
+                      <span>Source: Wikipedia</span>
                     </div>
-                  </a>
+                  </div>
+                )}
+
+                {/* DuckDuckGo */}
+                {data.rankedSources.duckDuckGo?.map((item, index) => (
+                  <div key={index} className="result-item">
+                    <h3>{item.title}</h3>
+                    <a href={item.url} target="_blank" rel="noreferrer">
+                      {item.url}
+                    </a>
+                    <div className="result-meta">
+                      <span>Source: {item.source}</span>
+                    </div>
+                  </div>
                 ))}
               </div>
             )}
+
           </div>
         </div>
       )}
