@@ -1,6 +1,6 @@
 import express from "express";
 import axios from "axios";
-
+import { SOURCE_WEIGHTS } from "../utils/sourceWeights.js";
 const router = express.Router();
 
 
@@ -35,7 +35,8 @@ function extractDDG(items) {
       normalizedDDGResults.push({
         title: item.Text,
         url: item.FirstURL,
-        source: "DuckDuckGo"
+        source: "DuckDuckGo",
+        score: 1 * SOURCE_WEIGHTS.internet
       });
     }
 

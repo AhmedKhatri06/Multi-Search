@@ -20,6 +20,10 @@ function rankResults(results, query) {
 
       // Entity importance (PROFILE > RECORD > AUX)
       score += (4 - item.priority) * 10;
+      // ✅ FIX: ensure internet results don't disappear
+      if (item.source === "Internet") {
+        score += 5;
+      }
 
       return { ...item, score };
     })
@@ -127,9 +131,11 @@ router.post("/", async (req, res) => {
     records: groupedResults.records,
     auxiliary: groupedResults.auxiliary,
     rankedSources: {
-      wikipedia: internetResults.find(r => r.provider === "Wikipedia"),
-      duckDuckGo: internetResults.filter(r => r.provider === "DuckDuckGo")
-    }
+    wikipedia:
+      internetResults.find(r => r.provider === "Wikipedia") || null,
+    duckDuckGo:
+      internetResults.filter(r => r.provider === "DuckDuckGo") || []
+  }
   });
 
 });
