@@ -66,6 +66,10 @@ router.post("/", async (req, res) => {
 
     // Wikipedia result
     if (internetData.wikipedia) {
+       const wikiText = `${internetData.wikipedia.title} ${internetData.wikipedia.description || ""}`;
+  
+  // ✅ relevance guard
+  if (normalize(wikiText).includes(normalize(query))) {
       internetResults.push({
         id: `wiki-${query}`,
         text: internetData.wikipedia.description || internetData.wikipedia.title,
@@ -78,6 +82,7 @@ router.post("/", async (req, res) => {
         priority: 3
       });
     }
+  }
 
     // DuckDuckGo results
     if (internetData.duckDuckGo?.results) {
