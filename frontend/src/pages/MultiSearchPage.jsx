@@ -10,6 +10,7 @@ const MultiSearchPage = () => {
   const [loading, setLoading] = useState(false);
   const [recent, setRecent] = useState([]);
   const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
+  const [internetLoaded, setInternetLoaded] = useState(false);
 
 
   // Load recent searches on refresh
@@ -30,24 +31,29 @@ const MultiSearchPage = () => {
     return "Medium relevance";
   };
 
-  const search = async (searchQuery = query) => {
+  const search = async (searchQuery = query, includeInternet = false) => {
     if (!searchQuery.trim()) return;
 
     try {
       setLoading(true);
       setQuery(searchQuery);
       setHasSearched(true);
-
+      if (!includeInternet) {
+        setInternetLoaded(false);
+      }
       const res = await fetch(`${API_URL}/api/multi-search`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ query: searchQuery }),
+        body: JSON.stringify({ query: searchQuery, includeInternet }),
       });
 
       const result = await res.json();
       setData(result);
+      if (includeInternet) {
+        setInternetLoaded(true);
+      }
 
       const updated = [
         searchQuery,
@@ -62,7 +68,6 @@ const MultiSearchPage = () => {
       setLoading(false);
     }
   };
-
 
   return (
     <div className="container">
@@ -170,10 +175,21 @@ const MultiSearchPage = () => {
                 ))}
               </div>
             )}
+            {data && !internetLoaded && (
+              <div style={{ textAlign: "center", margin: "20px 0" }}>
+                <button
+                  onClick={() => search(query, true)}
+                  disabled={loading}
+                  className="search-btn"
+                >
+                  🔍 Search on Internet
+                </button>
+              </div>
+            )}
 
             {/* RESOURCES */}
             {/* INTERNET RESULTS */}
-            {data?.rankedSources && (
+            {internetLoaded && data?.rankedSources && (
               <div className="card-section dashed">
                 <h2>INTERNET RESULTS</h2>
 
