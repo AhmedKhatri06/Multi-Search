@@ -176,11 +176,11 @@ const MultiSearchPage = () => {
               </div>
             )}
             {data && !internetLoaded && (
-              <div className="src-btn">
+              <div style={{ textAlign: "center", margin: "20px 0" }}>
                 <button
                   onClick={() => search(query, true)}
                   disabled={loading}
-                  className="search-btn"
+                  className="src-btn"
                 >
                   🔍 Search on Internet
                 </button>
