@@ -94,7 +94,7 @@ try {
 
     wikipediaData = {
       source: "Wikipedia",
-      title: pageTitle,
+      title: pageResponse.data.title,
       description: pageResponse.data.extract,
       pageUrl: pageResponse.data.content_urls?.desktop?.page
     };
