@@ -82,7 +82,7 @@ router.post("/", async (req, res) => {
         priority: 3
       });
     }
-  }
+  }        
 
     // DuckDuckGo results
     if (internetData.duckDuckGo?.results) {
@@ -152,20 +152,33 @@ const combined = [
 ];
 
   const rankedResults = rankResults(combined, query);
+  // ✅ STEP 8.7 – Add confidence labels
+const enrichedResults = rankedResults.map(item => {
+  let confidence = "Found Online";
+
+  if (item.type === "PROFILE" || item.type === "RECORD") {
+    confidence = "Verified (Local DB)";
+  }
+
+  return {
+    ...item,
+    confidence
+  };
+});
 
   const groupedResults = {
-    profile: rankedResults.filter(r => r.type === "PROFILE"),
-    records: rankedResults.filter(r => r.type === "RECORD"),
-    auxiliary: rankedResults.filter(r => r.type === "AUX")
+    profile: enrichedResults.filter(r => r.type === "PROFILE"),
+    records: enrichedResults.filter(r => r.type === "RECORD"),
+    auxiliary: enrichedResults.filter(r => r.type === "AUX")
   };
 
   const images = [
-    ...new Set(rankedResults.flatMap(r => r.images || []).filter(Boolean))
+    ...new Set(enrichedResults.flatMap(r => r.images || []).filter(Boolean))
   ];
 
   return res.json({
     query,
-    total: rankedResults.length,
+    total: enrichedResults.length,
     images,
     profile: groupedResults.profile,
     records: groupedResults.records,
