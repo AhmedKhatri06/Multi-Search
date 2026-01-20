@@ -5,9 +5,16 @@ import { sqliteSearch } from "../db/sqlite.js";
 import axios from "axios";
 
 dotenv.config();
+function normalize(value = "") {
+  return value
+    .toString()
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
 
 function rankResults(results, query) {
-  const q = query.toLowerCase();
+  const q = normalize(query);
 
   return results
     .map(item => {
@@ -90,27 +97,55 @@ router.post("/", async (req, res) => {
   } catch (error) {
     console.error("Internet search failed:", error.message);
   }
+// ✅ STEP 8.6 – Deduplicate Internet results by URL
+const internetMap = new Map();
 
+internetResults.forEach(item => {
+  if (!item.url) return;
 
-  const combined = [
-    ...mongoResults.map(doc => ({
-      id: doc._id,
-      text: doc.text,
-      source: "MongoDB",
-      type: "RECORD",
-      priority: 2
-    })),
+  const key = normalize(item.url);
+  if (!internetMap.has(key)) {
+    internetMap.set(key, item);
+  }
+});
 
-    ...sqliteResults.map(doc => ({
-      id: doc.id,
-      text: `${doc.name} - ${doc.title}`,
-      source: "SQLite",
-      type: "PROFILE",
-      priority: 1,
-      images: [doc.image].filter(Boolean)
-    })),
-    ...internetResults
-  ];
+const dedupedInternetResults = Array.from(internetMap.values());
+
+// ✅ STEP 8.6 – Deduplicate Local results by text
+const localMap = new Map();
+
+[
+  ...mongoResults.map(doc => ({
+    id: doc._id,
+    text: doc.text,
+    source: "MongoDB",
+    type: "RECORD",
+    priority: 2
+  })),
+
+  ...sqliteResults.map(doc => ({
+    id: doc.id,
+    text: `${doc.name} - ${doc.title}`,
+    source: "SQLite",
+    type: "PROFILE",
+    priority: 1,
+    images: [doc.image].filter(Boolean)
+  }))
+].forEach(item => {
+  const key = normalize(item.text);
+  if (!localMap.has(key)) {
+    localMap.set(key, item);
+  }
+});
+
+const dedupedLocalResults = Array.from(localMap.values());
+
+// ✅ Final combined results
+const combined = [
+  ...dedupedLocalResults,
+  ...dedupedInternetResults
+];
+
   const rankedResults = rankResults(combined, query);
 
   const groupedResults = {
