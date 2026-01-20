@@ -332,3 +332,14 @@ h1 {
 .citation-chip.muted {
   opacity: 0.6;
 }
+
+src-btn{
+  align-items: center;
+  text-justify: center;
+  margin: 20px 0;
+  background-color: #838b96;
+
+}
+src-btn:hover{
+  background: #64748b;
+}
