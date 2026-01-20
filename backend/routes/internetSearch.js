@@ -82,7 +82,7 @@ try {
     const pageTitle = searchResults[0].title;
 
     // Step 2: Get page summary
-    /*const pageResponse = await axios.get(
+    const pageResponse = await axios.get(
       `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(pageTitle)}`,
       {
         headers: {
@@ -90,7 +90,6 @@ try {
         }
       }
     );
-    */
 
     wikipediaData = {
       source: "Wikipedia",
