@@ -1,66 +1,26 @@
 import express from "express";
 import axios from "axios";
+import dotenv from "dotenv";
 
+dotenv.config();
 const router = express.Router();
 
-router.post("/", async (req, res) => {
-  const { query } = req.body;
+router.get("/", async (req, res) => {
+  const { q } = req.query;
 
-  if (!query) {
-    return res.status(400).json({ error: "Query is required" });
+  if (!q) {
+    return res.status(400).json({ error: "Query required" });
   }
 
   try {
     const response = await axios.get(
-      "https://api.duckduckgo.com/",
-      {
-        params: {
-          q: query,
-          format: "json",
-          no_redirect: 1,
-          no_html: 1
-        }
-      }
+      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(q)}`
     );
 
-    const data = response.data;
-
-    const results = [];
-
-    // Wikipedia-style result
-    if (data.AbstractText) {
-      results.push({
-        title: data.Heading,
-        description: data.AbstractText,
-        url: data.AbstractURL,
-        source: "Wikipedia"
-      });
-    }
-
-    // Related topics
-    if (data.RelatedTopics) {
-      data.RelatedTopics.forEach(item => {
-        if (item.Text && item.FirstURL) {
-          results.push({
-            title: item.Text,
-            url: item.FirstURL,
-            source: "DuckDuckGo"
-          });
-        }
-      });
-    }
-
-    return res.json({
-      query,
-      results
-    });
-
-  } catch (error) {
-    console.error("Global Internet Search failed:", error.message);
-    return res.json({
-      query,
-      results: []
-    });
+    res.json(response.data);
+  } catch (err) {
+    console.error("Internet fetch failed:", err.message);
+    res.status(500).json({ error: "Internet search failed" });
   }
 });
 

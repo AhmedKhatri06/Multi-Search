@@ -54,56 +54,54 @@ router.post("/", async (req, res) => {
 
   // SQLite → PROFILE
   const sqliteResults = await sqliteSearch(query);
+  // STEP 3: Improve internet query using local profile (if found)
+  let internetQuery = query;
 
-  // Internet Search (DuckDuckGo + Wikipedia)
+  if (sqliteResults.length > 0) {
+    const p = sqliteResults[0];
+    internetQuery = `${p.name} ${p.title || ""}`.trim();
+  }
+
+  // Internet Search
   let internetResults = [];
-if(internetResults){
+
   try {
     const internetResponse = await axios.get(
-      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(query)}`
+      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(internetQuery)}`
     );
 
     const internetData = internetResponse.data;
 
-    // Wikipedia result
     if (internetData.wikipedia) {
-      const wikiText = `${internetData.wikipedia.title} ${internetData.wikipedia.description || ""}`;
-
-      // ✅ relevance guard
-      if (normalize(wikiText).includes(normalize(query))) {
-        internetResults.push({
-          id: `wiki-${query}`,
-          text: internetData.wikipedia.description || internetData.wikipedia.title,
-          title: internetData.wikipedia.title,
-          description: internetData.wikipedia.description,
-          url: internetData.wikipedia.pageUrl,
-          source: "Internet",
-          provider: "Wikipedia",
-          type: "AUX",
-          priority: 3
-        });
-      }
-    }
-
-    // DuckDuckGo results
-    if (internetData.duckDuckGo?.results) {
-      internetData.duckDuckGo.results.forEach((item, index) => {
-        internetResults.push({
-          id: `ddg-${index}`,
-          text: item.title,
-          title: item.title,
-          url: item.url,
-          source: "Internet",
-          provider: "DuckDuckGo",
-          type: "AUX",
-          priority: 3
-        });
+      internetResults.push({
+        id: `wiki-${query}`,
+        text: internetData.wikipedia.description || internetData.wikipedia.title,
+        title: internetData.wikipedia.title,
+        url: internetData.wikipedia.pageUrl,
+        source: "Internet",
+        provider: "Wikipedia",
+        type: "AUX",
+        priority: 3
       });
     }
-  } catch (error) {
-    console.error("Internet search failed:", error.message);
+
+    internetData.duckDuckGo?.results?.forEach((item, index) => {
+      internetResults.push({
+        id: `ddg-${index}`,
+        text: item.title,
+        title: item.title,
+        url: item.url,
+        source: "Internet",
+        provider: "DuckDuckGo",
+        type: "AUX",
+        priority: 3
+      });
+    });
+
+  } catch (err) {
+    console.error("Internet search failed:", err.message);
   }
-}
+
   // ✅ STEP 8.6 – Deduplicate Internet results by URL
   const internetMap = new Map();
 
@@ -147,14 +145,14 @@ if(internetResults){
 
   const dedupedLocalResults = Array.from(localMap.values());
 
-  // ✅ Final combined results
+  // Final combined results
   const combined = [
     ...dedupedLocalResults,
     ...dedupedInternetResults
   ];
 
   const rankedResults = rankResults(combined, query);
-  // ✅ STEP 8.7 – Add confidence labels
+  //  Add confidence labels
   const enrichedResults = rankedResults.map(item => {
     let confidence = "Found Online";
 
