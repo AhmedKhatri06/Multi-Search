@@ -3,7 +3,8 @@ import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import axios from "axios";
-
+const internetCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 dotenv.config();
 function normalize(value = "") {
   return value
@@ -56,7 +57,7 @@ router.post("/", async (req, res) => {
 
   // Internet Search (DuckDuckGo + Wikipedia)
   let internetResults = [];
-
+if(internetResults){
   try {
     const internetResponse = await axios.get(
       `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(query)}`
@@ -66,23 +67,23 @@ router.post("/", async (req, res) => {
 
     // Wikipedia result
     if (internetData.wikipedia) {
-       const wikiText = `${internetData.wikipedia.title} ${internetData.wikipedia.description || ""}`;
-  
-  // ✅ relevance guard
-  if (normalize(wikiText).includes(normalize(query))) {
-      internetResults.push({
-        id: `wiki-${query}`,
-        text: internetData.wikipedia.description || internetData.wikipedia.title,
-        title: internetData.wikipedia.title,
-        description: internetData.wikipedia.description,
-        url: internetData.wikipedia.pageUrl,
-        source: "Internet",
-        provider: "Wikipedia",
-        type: "AUX",
-        priority: 3
-      });
+      const wikiText = `${internetData.wikipedia.title} ${internetData.wikipedia.description || ""}`;
+
+      // ✅ relevance guard
+      if (normalize(wikiText).includes(normalize(query))) {
+        internetResults.push({
+          id: `wiki-${query}`,
+          text: internetData.wikipedia.description || internetData.wikipedia.title,
+          title: internetData.wikipedia.title,
+          description: internetData.wikipedia.description,
+          url: internetData.wikipedia.pageUrl,
+          source: "Internet",
+          provider: "Wikipedia",
+          type: "AUX",
+          priority: 3
+        });
+      }
     }
-  }        
 
     // DuckDuckGo results
     if (internetData.duckDuckGo?.results) {
@@ -102,69 +103,70 @@ router.post("/", async (req, res) => {
   } catch (error) {
     console.error("Internet search failed:", error.message);
   }
-// ✅ STEP 8.6 – Deduplicate Internet results by URL
-const internetMap = new Map();
+}
+  // ✅ STEP 8.6 – Deduplicate Internet results by URL
+  const internetMap = new Map();
 
-internetResults.forEach(item => {
-  if (!item.url) return;
+  internetResults.forEach(item => {
+    if (!item.url) return;
 
-  const key = normalize(item.url);
-  if (!internetMap.has(key)) {
-    internetMap.set(key, item);
-  }
-});
+    const key = normalize(item.url);
+    if (!internetMap.has(key)) {
+      internetMap.set(key, item);
+    }
+  });
 
-const dedupedInternetResults = Array.from(internetMap.values());
+  const dedupedInternetResults = Array.from(internetMap.values());
 
-// ✅ STEP 8.6 – Deduplicate Local results by text
-const localMap = new Map();
+  // ✅ STEP 8.6 – Deduplicate Local results by text
+  const localMap = new Map();
 
-[
-  ...mongoResults.map(doc => ({
-    id: doc._id,
-    text: doc.text,
-    source: "MongoDB",
-    type: "RECORD",
-    priority: 2
-  })),
+  [
+    ...mongoResults.map(doc => ({
+      id: doc._id,
+      text: doc.text,
+      source: "MongoDB",
+      type: "RECORD",
+      priority: 2
+    })),
 
-  ...sqliteResults.map(doc => ({
-    id: doc.id,
-    text: `${doc.name} - ${doc.title}`,
-    source: "SQLite",
-    type: "PROFILE",
-    priority: 1,
-    images: [doc.image].filter(Boolean)
-  }))
-].forEach(item => {
-  const key = normalize(item.text);
-  if (!localMap.has(key)) {
-    localMap.set(key, item);
-  }
-});
+    ...sqliteResults.map(doc => ({
+      id: doc.id,
+      text: `${doc.name} - ${doc.title}`,
+      source: "SQLite",
+      type: "PROFILE",
+      priority: 1,
+      images: [doc.image].filter(Boolean)
+    }))
+  ].forEach(item => {
+    const key = normalize(item.text);
+    if (!localMap.has(key)) {
+      localMap.set(key, item);
+    }
+  });
 
-const dedupedLocalResults = Array.from(localMap.values());
+  const dedupedLocalResults = Array.from(localMap.values());
 
-// ✅ Final combined results
-const combined = [
-  ...dedupedLocalResults,
-  ...dedupedInternetResults
-];
+  // ✅ Final combined results
+  const combined = [
+    ...dedupedLocalResults,
+    ...dedupedInternetResults
+  ];
 
   const rankedResults = rankResults(combined, query);
   // ✅ STEP 8.7 – Add confidence labels
-const enrichedResults = rankedResults.map(item => {
-  let confidence = "Found Online";
+  const enrichedResults = rankedResults.map(item => {
+    let confidence = "Found Online";
 
-  if (item.type === "PROFILE" || item.type === "RECORD") {
-    confidence = "Verified (Local DB)";
-  }
+    if (item.type === "PROFILE" || item.type === "RECORD") {
+      confidence = "Verified (Local DB)";
+    }
 
-  return {
-    ...item,
-    confidence
-  };
-});
+    return {
+      ...item,
+      confidence
+    };
+  });
 
   const groupedResults = {
     profile: enrichedResults.filter(r => r.type === "PROFILE"),
@@ -184,11 +186,11 @@ const enrichedResults = rankedResults.map(item => {
     records: groupedResults.records,
     auxiliary: groupedResults.auxiliary,
     rankedSources: {
-    wikipedia:
-      internetResults.find(r => r.provider === "Wikipedia") || null,
-    duckDuckGo:
-      internetResults.filter(r => r.provider === "DuckDuckGo") || []
-  }
+      wikipedia:
+        internetResults.find(r => r.provider === "Wikipedia") || null,
+      duckDuckGo:
+        internetResults.filter(r => r.provider === "DuckDuckGo") || []
+    }
   });
 
 });
