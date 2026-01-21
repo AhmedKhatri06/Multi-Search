@@ -8,6 +8,7 @@ const MultiSearchPage = () => {
   const [query, setQuery] = useState(() => localStorage.getItem("search-query") || "");
   const [data, setData] = useState(() => JSON.parse(localStorage.getItem("search-data")) || null);
   const [loading, setLoading] = useState(false);
+  const [localLoading, setLocalLoading] = useState(false);
   const [recent, setRecent] = useState([]);
   const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
   const [internetLoaded, setInternetLoaded] = useState(false);
@@ -35,6 +36,7 @@ const MultiSearchPage = () => {
     if (!searchQuery.trim()) return;
 
     try {
+      setLocalLoading(true);
       setLoading(true);
       setQuery(searchQuery);
       setHasSearched(true);
@@ -62,9 +64,12 @@ const MultiSearchPage = () => {
 
       setRecent(updated);
       localStorage.setItem("recent-searches", JSON.stringify(updated));
-    } catch (err) {
+    } 
+    catch (err) {
       console.error(err);
-    } finally {
+    } 
+    finally {
+      setLocalLoading(false);
       setLoading(false);
     }
   };
@@ -95,11 +100,17 @@ const MultiSearchPage = () => {
           onKeyDown={e => e.key === "Enter" && search()}
           placeholder="Enter name , ID , company name....."
         />
-        <button onClick={() => search()} disabled={loading}>
-          Search
+        <button onClick={() => search()} disabled={localLoading || loading}>
+          {localLoading ? "Searching..." : "Search"}
         </button>
 
       </div>
+      {localLoading && (
+  <p style={{ marginTop: "10px", opacity: 0.7 }}>
+    Searching local data…
+  </p>
+)}
+
       {recent.length > 0 && (
         <div className="recent-searches">
           <h3>Recent searches</h3>
