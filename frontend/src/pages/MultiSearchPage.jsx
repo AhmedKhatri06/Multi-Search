@@ -104,7 +104,7 @@ const MultiSearchPage = () => {
       </div>
       {recent.length > 0 && (
         <div className="recent-searches">
-          <h3>Recent searches</h3>
+          <h3>🕘 Recent searches</h3>
           {recent.map(item => (
             <span key={item} className="recent-item">
               <span onClick={() => search(item)}>{item}</span>
@@ -131,7 +131,7 @@ const MultiSearchPage = () => {
             {/* VISUAL INSIGHTS */}
             {data.images?.length > 0 && (
               <div className="card-section dashed">
-                <h2>VISUAL INSIGHTS</h2>
+                <h2>📸 VISUAL INSIGHTS</h2>
                 <div className="visual-insights">
                   <img
                     src={data.images[0]}
@@ -145,7 +145,7 @@ const MultiSearchPage = () => {
             {/* PROFILES */}
             {data.profile?.length > 0 && (
               <div className="card-section dashed">
-                <h2>PROFILES</h2>
+                <h2>🧑‍💼 PROFILES</h2>
                 {data.profile.map(item => (
                   <div key={item.id} className="result-item">
                     <h3>{item.text}</h3>
@@ -163,7 +163,7 @@ const MultiSearchPage = () => {
             {/* RECORDS */}
             {data.records?.length > 0 && (
               <div className="card-section dashed">
-                <h2>RECORDS</h2>
+                <h2>📜 RECORDS</h2>
                 {data.records.map(item => (
                   <div key={item.id} className="result-item">
                     <h3>{item.text}</h3>
@@ -193,7 +193,7 @@ const MultiSearchPage = () => {
             {/* INTERNET RESULTS */}
             {internetLoaded && data?.rankedSources && (
               <div className="card-section dashed">
-                <h2>INTERNET RESULTS</h2>
+                <h2>🌐 INTERNET RESULTS</h2>
 
                 {/* Wikipedia */}
                 {data.rankedSources.wikipedia && (
