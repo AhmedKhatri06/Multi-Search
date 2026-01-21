@@ -343,3 +343,8 @@ src-btn{
 src-btn:hover{
   background: #64748b;
 }
+result-int{
+  display: flex;
+  background-color: #111;
+  color: #fff;
+}

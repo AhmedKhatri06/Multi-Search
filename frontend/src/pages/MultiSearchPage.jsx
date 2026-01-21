@@ -189,12 +189,11 @@ const MultiSearchPage = () => {
               </div>
             )}
 
-            {/* RESOURCES */}
             {/* INTERNET RESULTS */}
             {internetLoaded && data?.rankedSources && (
               <div className="card-section dashed">
                 <h2>🌐 INTERNET RESULTS</h2>
-
+                <div className="result-int">
                 {/* Wikipedia */}
                 {data.rankedSources.wikipedia && (
                   <div className="result-item">
@@ -225,6 +224,7 @@ const MultiSearchPage = () => {
                     </div>
                   </div>
                 ))}
+                </div>
               </div>
             )}
 
