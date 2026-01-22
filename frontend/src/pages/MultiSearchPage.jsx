@@ -190,43 +190,39 @@ const MultiSearchPage = () => {
             )}
 
             {/* INTERNET RESULTS */}
-            {internetLoaded && data?.rankedSources && (
+            {/* INTERNET RESULTS */}
+            {internetLoaded && (
               <div className="card-section dashed">
                 <h2>🌐 INTERNET RESULTS</h2>
-                <div className="result-int">
-                {/* Wikipedia */}
-                {data.rankedSources.wikipedia && (
-                  <div className="result-item">
-                    <h3>{data.rankedSources.wikipedia.title}</h3>
-                    <p>{data.rankedSources.wikipedia.description}</p>
-                    <a
-                      href={data.rankedSources.wikipedia.pageUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      {data.rankedSources.wikipedia.pageUrl}
-                    </a>
-                    <div className="result-meta">
-                      <span>Source: Wikipedia</span>
-                    </div>
-                  </div>
-                )}
 
-                {/* DuckDuckGo */}
-                {data.rankedSources.duckDuckGo?.map((item, index) => (
-                  <div key={index} className="result-item">
-                    <h3>{item.title}</h3>
-                    <a href={item.url} target="_blank" rel="noreferrer">
-                      {item.url}
-                    </a>
-                    <div className="result-meta">
-                      <span>Source: {item.source}</span>
+                {data?.auxiliary
+                  ?.filter(item => item.source === "Internet")
+                  .map(item => (
+                    <div key={item.id} className="result-item">
+                      <h3>{item.title || item.text}</h3>
+
+                      <p>{item.text}</p>
+
+                      {item.url && (
+                        <a href={item.url} target="_blank" rel="noreferrer">
+                          {item.url}
+                        </a>
+                      )}
+
+                      <div className="result-meta">
+                        <span>Source: {item.provider}</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
-                </div>
+                  ))}
+
+                {data?.auxiliary?.filter(i => i.source === "Internet").length === 0 && (
+                  <p style={{ textAlign: "center", opacity: 0.6 }}>
+                    No internet results found.
+                  </p>
+                )}
               </div>
             )}
+
 
           </div>
         </div>
