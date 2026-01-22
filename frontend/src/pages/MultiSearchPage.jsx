@@ -189,15 +189,16 @@ const MultiSearchPage = () => {
                 </button>
               </div>
             )}
-
-            {/* INTERNET RESULTS */}
             {/* INTERNET RESULTS */}
             {internetLoaded && (
               <div className="card-section dashed">
                 <h2>🌐 INTERNET RESULTS</h2>
 
-                {data?.auxiliary
-                  ?.filter(item => item.source === "Internet")
+                {[
+                  ...(data.profile || []),
+                  ...(data.records || [])
+                ]
+                  .filter(item => item.source === "Internet")
                   .map(item => (
                     <div key={item.id} className="result-item">
                       <h3>{item.title || item.text}</h3>
@@ -211,19 +212,21 @@ const MultiSearchPage = () => {
                       )}
 
                       <div className="result-meta">
-                        <span>Source: {item.provider}</span>
+                        <span>Source: {item.provider || "Internet"}</span>
                       </div>
                     </div>
                   ))}
 
-                {data?.auxiliary?.filter(i => i.source === "Internet").length === 0 && (
-                  <p style={{ textAlign: "center", opacity: 0.6 }}>
-                    No internet results found.
-                  </p>
-                )}
+                {[
+                  ...(data.profile || []),
+                  ...(data.records || [])
+                ].filter(item => item.source === "Internet").length === 0 && (
+                    <p style={{ textAlign: "center", opacity: 0.6 }}>
+                      No internet results found.
+                    </p>
+                  )}
               </div>
             )}
-
 
           </div>
         </div>
