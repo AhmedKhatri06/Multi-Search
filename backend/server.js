@@ -14,7 +14,10 @@ import internetSearch from "./routes/internetSearch.js";
 const app = express();
 const port = process.env.PORT || 5000;
 
-app.use(cors());
+app.use(cors({
+  origin: "*",   // TEMPORARY for testing
+  methods: ["GET"]
+}));
 app.use(express.json());
 
 // MongoDB connection
