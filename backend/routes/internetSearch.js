@@ -13,19 +13,41 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    const response = await axios.get("https://api.duckduckgo.com/", {
-  params: {
-    q,
-    format: "json",
-    no_redirect: 1,
-    no_html: 1
-  }
-});
+    // 🔹 DuckDuckGo Instant Answer API (NO images)
+    const ddgResponse = await axios.get("https://api.duckduckgo.com/", {
+      params: {
+        q,
+        format: "json",
+        no_redirect: 1,
+        no_html: 1
+      }
+    });
 
+    const data = ddgResponse.data;
 
-    res.json(response.data);
+    const results = {
+      wikipedia: data.AbstractText
+        ? {
+            title: data.Heading,
+            description: data.AbstractText,
+            pageUrl: data.AbstractURL
+          }
+        : null,
+
+      duckDuckGo: {
+        results: (data.RelatedTopics || [])
+          .filter(item => item.Text && item.FirstURL)
+          .map(item => ({
+            title: item.Text,
+            url: item.FirstURL
+          }))
+      }
+    };
+
+    res.json(results);
+
   } catch (err) {
-    console.error("Internet fetch failed:", err.message);
+    console.error("Internet search failed:", err.message);
     res.status(500).json({ error: "Internet search failed" });
   }
 });

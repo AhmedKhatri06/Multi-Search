@@ -64,52 +64,37 @@ router.post("/", async (req, res) => {
 
   // Internet Search
   // 🌍 GLOBAL INTERNET SEARCH (NO IMAGES, LINKS ONLY)
+
+// 🌍 REAL INTERNET SEARCH – SERPAPI (GOOGLE)
 let internetResults = [];
 
 try {
-  const response = await axios.get("https://api.duckduckgo.com/", {
+  const response = await axios.get("https://serpapi.com/search", {
     params: {
       q: internetQuery,
-      format: "json",
-      no_redirect: 1,
-      no_html: 1
+      engine: "google",
+      api_key: process.env.SERPAPI_KEY,
+      num: 5
     }
   });
 
-  const data = response.data;
+  const results = response.data?.organic_results || [];
 
-  // Wikipedia-style abstract
-  if (data.AbstractText && data.AbstractURL) {
+  results.forEach((item, index) => {
     internetResults.push({
-      id: `wiki-${query}`,
-      text: data.AbstractText,
-      title: data.Heading,
-      url: data.AbstractURL,
+      id: `google-${index}`,
+      title: item.title,
+      text: item.snippet,
+      url: item.link,
       source: "Internet",
-      provider: "Wikipedia",
+      provider: "Google",
       type: "AUX",
       priority: 3
     });
-  }
-
-  // DuckDuckGo related links
-  (data.RelatedTopics || []).forEach((item, index) => {
-    if (item.Text && item.FirstURL) {
-      internetResults.push({
-        id: `ddg-${index}`,
-        text: item.Text,
-        title: item.Text,
-        url: item.FirstURL,
-        source: "Internet",
-        provider: "DuckDuckGo",
-        type: "AUX",
-        priority: 3
-      });
-    }
   });
 
 } catch (err) {
-  console.error("Global search failed:", err.message);
+  console.error("SerpAPI search failed:", err.message);
 }
 
   // ✅ STEP 8.6 – Deduplicate Internet results by URL
