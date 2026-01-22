@@ -172,6 +172,10 @@ router.post("/", async (req, res) => {
     auxiliary: enrichedResults.filter(r => r.type === "AUX")
   };
 
+  const images = [
+    ...new Set(enrichedResults.flatMap(r => r.images || []).filter(Boolean))
+  ];
+
   return res.json({
     query,
     total: enrichedResults.length,
