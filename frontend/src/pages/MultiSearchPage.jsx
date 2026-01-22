@@ -12,7 +12,12 @@ const MultiSearchPage = () => {
   const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
   const [internetLoaded, setInternetLoaded] = useState(false);
 
-  console.log("FULL DATA:", data);
+  useEffect(() => {
+  if (data) {
+    console.log("FULL DATA:", data);
+  }
+}, [data]);
+
 
   // Load recent searches on refresh
   useEffect(() => {

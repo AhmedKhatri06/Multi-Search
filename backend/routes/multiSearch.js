@@ -62,9 +62,6 @@ router.post("/", async (req, res) => {
     internetQuery = `${p.name} ${p.title || ""}`.trim();
   }
 
-  // Internet Search
-  // 🌍 GLOBAL INTERNET SEARCH (NO IMAGES, LINKS ONLY)
-
 // 🌍 REAL INTERNET SEARCH – SERPAPI (GOOGLE)
 let internetResults = [];
 
