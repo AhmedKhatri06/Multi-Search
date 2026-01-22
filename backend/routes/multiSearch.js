@@ -63,44 +63,54 @@ router.post("/", async (req, res) => {
   }
 
   // Internet Search
-  let internetResults = [];
+  // 🌍 GLOBAL INTERNET SEARCH (NO IMAGES, LINKS ONLY)
+let internetResults = [];
 
-  try {
-    const internetResponse = await axios.get(
-      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(internetQuery)}`
-    );
-
-    const internetData = internetResponse.data;
-
-    if (internetData.wikipedia) {
-      internetResults.push({
-        id: `wiki-${query}`,
-        text: internetData.wikipedia.description || internetData.wikipedia.title,
-        title: internetData.wikipedia.title,
-        url: internetData.wikipedia.pageUrl,
-        source: "Internet",
-        provider: "Wikipedia",
-        type: "AUX",
-        priority: 3
-      });
+try {
+  const response = await axios.get("https://api.duckduckgo.com/", {
+    params: {
+      q: internetQuery,
+      format: "json",
+      no_redirect: 1,
+      no_html: 1
     }
+  });
 
-    internetData.duckDuckGo?.results?.forEach((item, index) => {
+  const data = response.data;
+
+  // Wikipedia-style abstract
+  if (data.AbstractText && data.AbstractURL) {
+    internetResults.push({
+      id: `wiki-${query}`,
+      text: data.AbstractText,
+      title: data.Heading,
+      url: data.AbstractURL,
+      source: "Internet",
+      provider: "Wikipedia",
+      type: "AUX",
+      priority: 3
+    });
+  }
+
+  // DuckDuckGo related links
+  (data.RelatedTopics || []).forEach((item, index) => {
+    if (item.Text && item.FirstURL) {
       internetResults.push({
         id: `ddg-${index}`,
-        text: item.title,
-        title: item.title,
-        url: item.url,
+        text: item.Text,
+        title: item.Text,
+        url: item.FirstURL,
         source: "Internet",
         provider: "DuckDuckGo",
         type: "AUX",
         priority: 3
       });
-    });
+    }
+  });
 
-  } catch (err) {
-    console.error("Internet search failed:", err.message);
-  }
+} catch (err) {
+  console.error("Global search failed:", err.message);
+}
 
   // ✅ STEP 8.6 – Deduplicate Internet results by URL
   const internetMap = new Map();
