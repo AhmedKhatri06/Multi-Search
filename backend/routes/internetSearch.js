@@ -13,9 +13,15 @@ router.get("/", async (req, res) => {
   }
 
   try {
-    const response = await axios.get(
-      `${process.env.BACKEND_URL}/api/search/internet?q=${encodeURIComponent(q)}`
-    );
+    const response = await axios.get("https://api.duckduckgo.com/", {
+  params: {
+    q,
+    format: "json",
+    no_redirect: 1,
+    no_html: 1
+  }
+});
+
 
     res.json(response.data);
   } catch (err) {
