@@ -175,6 +175,7 @@ router.post("/", async (req, res) => {
   return res.json({
     query,
     total: enrichedResults.length,
+    images,
     profile: groupedResults.profile,
     records: groupedResults.records,
     auxiliary: groupedResults.auxiliary,
