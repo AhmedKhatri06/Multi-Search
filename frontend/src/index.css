@@ -296,6 +296,8 @@ h1 {
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1.5rem;
   margin: 1.5rem 0;
+  align-self: center;
+  justify-self: center;
 }
 
 .main-portrait {
