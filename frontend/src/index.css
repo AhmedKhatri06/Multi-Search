@@ -292,14 +292,15 @@ h1 {
 
 /* Visual Insights */
 .visual-insights {
-  display: grid;
+  display: fit-con;
   grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1.5rem;
   margin: 1.5rem 0;
 }
 
 .main-portrait {
-  width: 100%;
+  min-width: fit-content;
+  min-height: fit-content;
   border-radius: var(--radius-lg);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   border: 1px solid var(--border-glass);
