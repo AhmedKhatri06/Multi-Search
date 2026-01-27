@@ -79,7 +79,7 @@ const MultiSearchPage = () => {
 
   return (
     <div className="container">
-      <h1>Multi-Search</h1>
+      <h1>DeepSearch<sup>AI</sup></h1>
       <div className="search-box">
         {hasSearched && (
           <button
@@ -92,7 +92,7 @@ const MultiSearchPage = () => {
               localStorage.removeItem("search-data");
               localStorage.removeItem("has-searched");
             }}
-            title="Back to Search"
+            title="Reset Research"
           >
             ←
           </button>
@@ -101,16 +101,22 @@ const MultiSearchPage = () => {
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={e => e.key === "Enter" && search()}
-          placeholder="Enter name , ID , company name....."
+          placeholder="Ask DeepSearch to research anything..."
         />
         <button onClick={() => search()} disabled={loading}>
-          Search
+          {loading ? "Researching..." : "DeepSearch"}
         </button>
-
       </div>
-      {recent.length > 0 && (
+
+      {loading && (
+        <div className="research-status">
+          <div className="pulse-dot"></div>
+          Scanning internal systems and external sources...
+        </div>
+      )}
+      {recent.length > 0 && !hasSearched && (
         <div className="recent-searches">
-          <h3>Recent searches</h3>
+          <h3>Previous Reports</h3>
           <div className="recent-items-container">
             {recent.map(item => (
               <div key={item} className="recent-item">
@@ -197,38 +203,50 @@ const MultiSearchPage = () => {
                 </button>
               </div>
             )}
-            {/* INTERNET RESULTS */}
+            {/* INTERNET RESULTS AS SOURCES GRID */}
             {internetLoaded && (
               <div className="card-section">
-                <h2>Internet Results</h2>
+                <h2>Research Sources</h2>
+                <div className="sources-grid">
+                  {data?.auxiliary
+                    ?.filter(item => item.source === "Internet")
+                    .map(item => (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="source-card"
+                      >
+                        <div className="source-title">{item.title || item.text}</div>
+                        <div className="source-url">{item.provider}</div>
+                        <div className="source-footer">
+                          {item.confidence && (
+                            <span className="badge">{item.confidence}</span>
+                          )}
+                        </div>
+                      </a>
+                    ))}
+                </div>
 
-                {data?.auxiliary
-                  ?.filter(item => item.source === "Internet")
-                  .map(item => (
-                    <div key={item.id} className="result-item">
-                      <h3>{item.title || item.text}</h3>
-
-                      <p>{item.text}</p>
-
-                      {item.url && (
-                        <a href={item.url} target="_blank" rel="noreferrer">
-                          {item.url}
-                        </a>
-                      )}
-
-                      <div className="result-meta">
-                        <span>Source: {item.provider}</span>
-                        {item.confidence && (
-                          <span className="badge">{item.confidence}</span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
+                {/* Detailed Internet Findings if any extra text exists */}
+                {data?.auxiliary?.filter(item => item.source === "Internet" && item.text && item.text.length > 100).length > 0 && (
+                  <div className="internet-details">
+                    <h3>Detailed Findings</h3>
+                    {data.auxiliary
+                      .filter(item => item.source === "Internet" && item.text && item.text.length > 100)
+                      .map(item => (
+                        <div key={`detail-${item.id}`} className="result-item">
+                          <p>{item.text}</p>
+                        </div>
+                      ))}
+                  </div>
+                )}
 
                 {(!data?.auxiliary ||
                   data.auxiliary.filter(i => i.source === "Internet").length === 0) && (
                     <p style={{ textAlign: "center", opacity: 0.6, padding: "1rem" }}>
-                      No internet results found.
+                      No internet research sources identified.
                     </p>
                   )}
               </div>
