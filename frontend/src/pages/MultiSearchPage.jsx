@@ -13,10 +13,10 @@ const MultiSearchPage = () => {
   const [internetLoaded, setInternetLoaded] = useState(false);
 
   useEffect(() => {
-  if (data) {
-    console.log("FULL DATA:", data);
-  }
-}, [data]);
+    if (data) {
+      console.log("FULL DATA:", data);
+    }
+  }, [data]);
 
 
   // Load recent searches on refresh
@@ -110,24 +110,27 @@ const MultiSearchPage = () => {
       </div>
       {recent.length > 0 && (
         <div className="recent-searches">
-          <h3>🕘 Recent searches</h3>
-          {recent.map(item => (
-            <span key={item} className="recent-item">
-              <span onClick={() => search(item)}>{item}</span>
-              <button
-                onClick={() => {
-                  const filtered = recent.filter(r => r !== item);
-                  setRecent(filtered);
-                  localStorage.setItem(
-                    "recent-searches",
-                    JSON.stringify(filtered)
-                  );
-                }}
-              >
-                ×
-              </button>
-            </span>
-          ))}
+          <h3>Recent searches</h3>
+          <div className="recent-items-container">
+            {recent.map(item => (
+              <div key={item} className="recent-item">
+                <span onClick={() => search(item)}>{item}</span>
+                <button
+                  onClick={() => {
+                    const filtered = recent.filter(r => r !== item);
+                    setRecent(filtered);
+                    localStorage.setItem(
+                      "recent-searches",
+                      JSON.stringify(filtered)
+                    );
+                  }}
+                  title="Remove from history"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
@@ -136,13 +139,13 @@ const MultiSearchPage = () => {
           <div className="results-list">
             {/* VISUAL INSIGHTS */}
             {data.images?.length > 0 && (
-              <div className="card-section dashed">
-                <h2>📸 VISUAL INSIGHTS</h2>
+              <div className="card-section">
+                <h2>Visual Insights</h2>
                 <div className="visual-insights">
                   <img
                     src={data.images[0]}
                     className="main-portrait"
-                    alt=""
+                    alt="Visual insight"
                   />
                 </div>
               </div>
@@ -150,8 +153,8 @@ const MultiSearchPage = () => {
 
             {/* PROFILES */}
             {data.profile?.length > 0 && (
-              <div className="card-section dashed">
-                <h2>🧑‍💼 PROFILES</h2>
+              <div className="card-section">
+                <h2>Profiles</h2>
                 {data.profile.map(item => (
                   <div key={item.id} className="result-item">
                     <h3>{item.text}</h3>
@@ -168,8 +171,8 @@ const MultiSearchPage = () => {
 
             {/* RECORDS */}
             {data.records?.length > 0 && (
-              <div className="card-section dashed">
-                <h2>📜 RECORDS</h2>
+              <div className="card-section">
+                <h2>Records</h2>
                 {data.records.map(item => (
                   <div key={item.id} className="result-item">
                     <h3>{item.text}</h3>
@@ -196,8 +199,8 @@ const MultiSearchPage = () => {
             )}
             {/* INTERNET RESULTS */}
             {internetLoaded && (
-              <div className="card-section dashed">
-                <h2>🌐 INTERNET RESULTS</h2>
+              <div className="card-section">
+                <h2>Internet Results</h2>
 
                 {data?.auxiliary
                   ?.filter(item => item.source === "Internet")
@@ -215,16 +218,16 @@ const MultiSearchPage = () => {
 
                       <div className="result-meta">
                         <span>Source: {item.provider}</span>
-                        <span style={{ marginLeft: "10px" }}>
-                          {item.confidence}
-                        </span>
+                        {item.confidence && (
+                          <span className="badge">{item.confidence}</span>
+                        )}
                       </div>
                     </div>
                   ))}
 
                 {(!data?.auxiliary ||
                   data.auxiliary.filter(i => i.source === "Internet").length === 0) && (
-                    <p style={{ textAlign: "center", opacity: 0.6 }}>
+                    <p style={{ textAlign: "center", opacity: 0.6, padding: "1rem" }}>
                       No internet results found.
                     </p>
                   )}
