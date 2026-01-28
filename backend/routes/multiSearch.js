@@ -45,18 +45,31 @@ function rankResults(results, query) {
  * Core search logic combined across MongoDB, SQLite, and SerpAPI.
  */
 async function performSearch(query) {
-  // MongoDB → RECORDS
-  const mongoPromise = Document.find({
+  // 1. Primary searches (Exact substring)
+  const queryWords = query.split(" ").filter(w => w.length > 2);
+
+  let mongoResults = await Document.find({
     text: { $regex: query, $options: "i" }
   }).lean();
 
-  // SQLite → PROFILE
-  const sqlitePromise = sqliteSearch(query);
+  let sqliteResults = await sqliteSearch(query);
 
-  const [mongoResults, sqliteResults] = await Promise.all([
-    mongoPromise,
-    sqlitePromise
-  ]);
+  // 2. Fallback: If no results, try keyword-based search (common for long AI-generated queries)
+  if (mongoResults.length === 0 && queryWords.length >= 2) {
+    const nameGuess = queryWords.slice(0, 2).join(" ");
+    mongoResults = await Document.find({
+      text: { $regex: nameGuess, $options: "i" }
+    }).lean();
+  }
+
+  // 3. Deeper Fallback: Keyword intersection
+  if (mongoResults.length === 0 && queryWords.length > 0) {
+    mongoResults = await Document.find({
+      $and: queryWords.slice(0, 3).map(word => ({
+        text: { $regex: word, $options: "i" }
+      }))
+    }).lean();
+  }
 
   // Improve internet query using local profile (if found)
   let internetQuery = query;
