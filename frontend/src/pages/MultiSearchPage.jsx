@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import "../index.css";
 
-console.log(import.meta.env.VITE_API_URL);
 const API_URL = import.meta.env.VITE_API_URL;
 
 const MultiSearchPage = () => {
   const [query, setQuery] = useState(() => localStorage.getItem("search-query") || "");
   const [data, setData] = useState(() => JSON.parse(localStorage.getItem("search-data")) || null);
+  const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [isIdentifying, setIsIdentifying] = useState(false);
   const [recent, setRecent] = useState([]);
   const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
   const [internetLoaded, setInternetLoaded] = useState(false);
@@ -17,7 +18,6 @@ const MultiSearchPage = () => {
       console.log("FULL DATA:", data);
     }
   }, [data]);
-
 
   // Load recent searches on refresh
   useEffect(() => {
@@ -33,8 +33,47 @@ const MultiSearchPage = () => {
   }, [query, data, hasSearched]);
 
   const getRelevanceLabel = (score = 0) => {
-    if (score >= 40) return "Medium relevance";
-    return "Medium relevance";
+    if (score >= 40) return "High relevance";
+    if (score >= 20) return "Medium relevance";
+    return "Low relevance";
+  };
+
+  const handleIdentify = async () => {
+    if (!query.trim()) return;
+
+    try {
+      setIsIdentifying(true);
+      setCandidates([]);
+      setData(null);
+      setHasSearched(true);
+
+      const res = await fetch(`${API_URL}/api/multi-search/identify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: query }),
+      });
+
+      const result = await res.json();
+      if (Array.isArray(result)) {
+        setCandidates(result);
+      } else {
+        console.warn("No confident candidates found.");
+        // If no candidates, maybe fallback to direct search?
+        search(query);
+      }
+    } catch (err) {
+      console.error("Identification failed:", err);
+    } finally {
+      setIsIdentifying(false);
+    }
+  };
+
+  const handleCandidateSelect = (candidate) => {
+    const refinedQuery = `${candidate.name} ${candidate.description}`;
+    setCandidates([]);
+    search(refinedQuery);
   };
 
   const search = async (searchQuery = query, includeInternet = false) => {
@@ -68,13 +107,21 @@ const MultiSearchPage = () => {
 
       setRecent(updated);
       localStorage.setItem("recent-searches", JSON.stringify(updated));
-    }
-    catch (err) {
+    } catch (err) {
       console.error(err);
-    }
-    finally {
+    } finally {
       setLoading(false);
     }
+  };
+
+  const handleReset = () => {
+    setQuery("");
+    setData(null);
+    setCandidates([]);
+    setHasSearched(false);
+    localStorage.removeItem("search-query");
+    localStorage.removeItem("search-data");
+    localStorage.removeItem("has-searched");
   };
 
   return (
@@ -84,14 +131,7 @@ const MultiSearchPage = () => {
         {hasSearched && (
           <button
             className="search-back-btn"
-            onClick={() => {
-              setQuery("");
-              setData(null);
-              setHasSearched(false);
-              localStorage.removeItem("search-query");
-              localStorage.removeItem("search-data");
-              localStorage.removeItem("has-searched");
-            }}
+            onClick={handleReset}
             title="Reset Research"
           >
             ←
@@ -100,20 +140,24 @@ const MultiSearchPage = () => {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && search()}
-          placeholder="Ask DeepSearch to research anything..."
+          onKeyDown={e => e.key === "Enter" && (candidates.length === 0 ? handleIdentify() : search())}
+          placeholder="Ask DeepSearch to research anyone..."
         />
-        <button onClick={() => search()} disabled={loading}>
-          {loading ? "Researching..." : "DeepSearch"}
+        <button
+          onClick={() => candidates.length === 0 ? handleIdentify() : search()}
+          disabled={loading || isIdentifying}
+        >
+          {loading || isIdentifying ? "Analyzing..." : "Research"}
         </button>
       </div>
 
-      {loading && (
+      {(loading || isIdentifying) && (
         <div className="research-status">
           <div className="pulse-dot"></div>
-          Scanning internal systems and external sources...
+          {isIdentifying ? "Identifying possible matches..." : "Scanning systems and internal sources..."}
         </div>
       )}
+
       {recent.length > 0 && !hasSearched && (
         <div className="recent-searches">
           <h3>Previous Reports</h3>
@@ -136,6 +180,37 @@ const MultiSearchPage = () => {
                 </button>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* CANDIDATES LIST */}
+      {candidates.length > 0 && (
+        <div className="results-wrapper">
+          <div className="candidates-section">
+            <h2 className="section-title">Who are you looking for?</h2>
+            <p className="section-subtitle">Select a person to see detailed research</p>
+            <div className="candidates-grid">
+              {candidates.map((person, idx) => (
+                <div
+                  key={idx}
+                  className="candidate-card"
+                  onClick={() => handleCandidateSelect(person)}
+                >
+                  <div className="candidate-info">
+                    <h3>{person.name}</h3>
+                    <p className="candidate-desc">{person.description}</p>
+                    {person.location && <p className="candidate-loc">📍 {person.location}</p>}
+                  </div>
+                  <div className={`candidate-confidence ${person.confidence}`}>
+                    {person.confidence} confidence
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button className="search-anyway-btn" onClick={() => search(query)}>
+              Search for "{query}" directly instead
+            </button>
           </div>
         </div>
       )}
@@ -192,6 +267,7 @@ const MultiSearchPage = () => {
                 ))}
               </div>
             )}
+
             {data && !internetLoaded && (
               <div style={{ textAlign: "center", margin: "20px 0" }}>
                 <button
@@ -199,11 +275,12 @@ const MultiSearchPage = () => {
                   disabled={loading}
                   className="src-btn"
                 >
-                  🔍 Search on Internet
+                  🔍 Enhance with Internet Research
                 </button>
               </div>
             )}
-            {/* INTERNET RESULTS AS SOURCES GRID */}
+
+            {/* INTERNET RESULTS */}
             {internetLoaded && (
               <div className="card-section">
                 <h2>Research Sources</h2>
@@ -229,7 +306,6 @@ const MultiSearchPage = () => {
                     ))}
                 </div>
 
-                {/* Detailed Internet Findings if any extra text exists */}
                 {data?.auxiliary?.filter(item => item.source === "Internet" && item.text && item.text.length > 100).length > 0 && (
                   <div className="internet-details">
                     <h3>Detailed Findings</h3>
@@ -251,13 +327,11 @@ const MultiSearchPage = () => {
                   )}
               </div>
             )}
-
           </div>
         </div>
       )}
     </div>
   );
-
 };
 
 export default MultiSearchPage;

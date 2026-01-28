@@ -339,3 +339,115 @@ h1 {
     flex-direction: column;
   }
 }
+/* Candidates Section */
+.candidates-section {
+  background: var(--bg-surface);
+  backdrop-filter: blur(8px);
+  border-radius: var(--radius-xl);
+  padding: 2.5rem;
+  margin-bottom: 2.5rem;
+  border: 1px solid var(--primary);
+  box-shadow: 0 0 30px rgba(0, 209, 255, 0.1);
+  text-align: center;
+}
+
+.section-title {
+  font-size: 1.75rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+  color: var(--text-primary);
+}
+
+.section-subtitle {
+  color: var(--text-secondary);
+  margin-bottom: 2rem;
+  font-size: 1rem;
+}
+
+.candidates-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+.candidate-card {
+  background: rgba(44, 44, 46, 0.5);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+.candidate-card:hover {
+  background: rgba(0, 209, 255, 0.05);
+  border-color: var(--primary);
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px -10px rgba(0, 209, 255, 0.2);
+}
+
+.candidate-info h3 {
+  margin: 0 0 0.5rem 0;
+  font-size: 1.25rem;
+  color: var(--primary);
+}
+
+.candidate-desc {
+  font-size: 0.9375rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+}
+
+.candidate-loc {
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.candidate-confidence {
+  margin-top: 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  display: inline-block;
+  align-self: flex-start;
+}
+
+.candidate-confidence.high {
+  color: #10b981;
+  background: rgba(16, 185, 129, 0.1);
+}
+
+.candidate-confidence.medium {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.1);
+}
+
+.candidate-confidence.low {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+}
+
+.search-anyway-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  font-size: 0.875rem;
+  cursor: pointer;
+  transition: color 0.2s;
+  margin-top: 1rem;
+}
+
+.search-anyway-btn:hover {
+  color: var(--text-primary);
+}
