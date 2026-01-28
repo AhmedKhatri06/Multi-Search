@@ -73,7 +73,8 @@ const MultiSearchPage = () => {
   const handleCandidateSelect = (candidate) => {
     const refinedQuery = `${candidate.name} ${candidate.description}`;
     setCandidates([]);
-    search(refinedQuery);
+    // Automatically trigger deep search with internet
+    search(refinedQuery, true);
   };
 
   const search = async (searchQuery = query, includeInternet = false) => {
@@ -119,6 +120,7 @@ const MultiSearchPage = () => {
     setData(null);
     setCandidates([]);
     setHasSearched(false);
+    setInternetLoaded(false);
     localStorage.removeItem("search-query");
     localStorage.removeItem("search-data");
     localStorage.removeItem("has-searched");
@@ -140,11 +142,11 @@ const MultiSearchPage = () => {
         <input
           value={query}
           onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && (candidates.length === 0 ? handleIdentify() : search())}
+          onKeyDown={e => e.key === "Enter" && (candidates.length === 0 ? handleIdentify() : search(query, true))}
           placeholder="Ask DeepSearch to research anyone..."
         />
         <button
-          onClick={() => candidates.length === 0 ? handleIdentify() : search()}
+          onClick={() => candidates.length === 0 ? handleIdentify() : search(query, true)}
           disabled={loading || isIdentifying}
         >
           {loading || isIdentifying ? "Analyzing..." : "Research"}
@@ -154,7 +156,7 @@ const MultiSearchPage = () => {
       {(loading || isIdentifying) && (
         <div className="research-status">
           <div className="pulse-dot"></div>
-          {isIdentifying ? "Identifying possible matches..." : "Scanning systems and internal sources..."}
+          {isIdentifying ? "Identifying possible matches..." : "Searching local databases and social profiles..."}
         </div>
       )}
 
@@ -164,7 +166,7 @@ const MultiSearchPage = () => {
           <div className="recent-items-container">
             {recent.map(item => (
               <div key={item} className="recent-item">
-                <span onClick={() => search(item)}>{item}</span>
+                <span onClick={() => search(item, true)}>{item}</span>
                 <button
                   onClick={() => {
                     const filtered = recent.filter(r => r !== item);
@@ -184,12 +186,12 @@ const MultiSearchPage = () => {
         </div>
       )}
 
-      {/* CANDIDATES LIST */}
+      {/* CANDIDATES LIST (STAGE 1) */}
       {candidates.length > 0 && (
         <div className="results-wrapper">
           <div className="candidates-section">
             <h2 className="section-title">Who are you looking for?</h2>
-            <p className="section-subtitle">Select a person to see detailed research</p>
+            <p className="section-subtitle">Select a person to see detailed social research</p>
             <div className="candidates-grid">
               {candidates.map((person, idx) => (
                 <div
@@ -208,7 +210,7 @@ const MultiSearchPage = () => {
                 </div>
               ))}
             </div>
-            <button className="search-anyway-btn" onClick={() => search(query)}>
+            <button className="search-anyway-btn" onClick={() => search(query, true)}>
               Search for "{query}" directly instead
             </button>
           </div>
@@ -218,75 +220,86 @@ const MultiSearchPage = () => {
       {data && (
         <div className="results-wrapper">
           <div className="results-list">
-            {/* VISUAL INSIGHTS */}
+
+            {/* 1. LOCAL PROFILES (HIGHEST PRIORITY) */}
+            {data.profile?.length > 0 && (
+              <div className="card-section local-section">
+                <h2>Verified Profiles</h2>
+                {data.profile.map(item => (
+                  <div key={item.id} className="result-item local-item">
+                    <h3>{item.text}</h3>
+                    <div className="result-meta">
+                      <span className="badge verified">Verified (Local DB)</span>
+                      <span>Source: {item.source}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 2. LOCAL RECORDS */}
+            {data.records?.length > 0 && (
+              <div className="card-section local-section">
+                <h2>Internal Records</h2>
+                {data.records.map(item => (
+                  <div key={item.id} className="result-item local-item">
+                    <h3>{item.text}</h3>
+                    <div className="result-meta">
+                      <span className="badge verified">Verified (Local DB)</span>
+                      <span>Source: {item.source}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* 3. IMAGE GALLERY (TOP OF INTERNET) */}
             {data.images?.length > 0 && (
-              <div className="card-section">
-                <h2>Visual Insights</h2>
-                <div className="visual-insights">
-                  <img
-                    src={data.images[0]}
-                    className="main-portrait"
-                    alt="Visual insight"
-                  />
+              <div className="card-section gallery-section">
+                <h2>Media Gallery</h2>
+                <div className="image-gallery">
+                  {data.images.map((img, idx) => (
+                    <div key={idx} className="gallery-item">
+                      <img src={img} alt={`Social finding ${idx}`} loading="lazy" />
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-            {/* PROFILES */}
-            {data.profile?.length > 0 && (
-              <div className="card-section">
-                <h2>Profiles</h2>
-                {data.profile.map(item => (
-                  <div key={item.id} className="result-item">
-                    <h3>{item.text}</h3>
-                    <div className="result-meta">
-                      <span className="badge">
-                        {getRelevanceLabel(item.score)}
-                      </span>
-                      <span>Source: {item.source}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* RECORDS */}
-            {data.records?.length > 0 && (
-              <div className="card-section">
-                <h2>Records</h2>
-                {data.records.map(item => (
-                  <div key={item.id} className="result-item">
-                    <h3>{item.text}</h3>
-                    <div className="result-meta">
-                      <span className="badge">
-                        {getRelevanceLabel(item.score)}
-                      </span>
-                      <span>Source: {item.source}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {data && !internetLoaded && (
-              <div style={{ textAlign: "center", margin: "20px 0" }}>
-                <button
-                  onClick={() => search(query, true)}
-                  disabled={loading}
-                  className="src-btn"
-                >
-                  🔍 Enhance with Internet Research
-                </button>
-              </div>
-            )}
-
-            {/* INTERNET RESULTS */}
+            {/* 4. SOCIAL & INTERNET SOURCES */}
             {internetLoaded && (
               <div className="card-section">
-                <h2>Research Sources</h2>
+                <h2>Social & Research Sources</h2>
+
+                {/* Social Handles Priority */}
                 <div className="sources-grid">
                   {data?.auxiliary
-                    ?.filter(item => item.source === "Internet")
+                    ?.filter(item => item.source === "Internet" && item.provider !== "Google")
+                    .map(item => (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="source-card social-card"
+                      >
+                        <div className="source-header">
+                          <span className={`social-icon ${item.provider.toLowerCase()}`}></span>
+                          <span className="source-provider">{item.provider}</span>
+                        </div>
+                        <div className="source-title">{item.title || item.text}</div>
+                        <div className="source-footer">
+                          <span className="badge">Public Profile</span>
+                        </div>
+                      </a>
+                    ))}
+                </div>
+
+                {/* Other Internet Results */}
+                <div className="sources-grid">
+                  {data?.auxiliary
+                    ?.filter(item => item.source === "Internet" && item.provider === "Google")
                     .map(item => (
                       <a
                         key={item.id}
@@ -322,7 +335,7 @@ const MultiSearchPage = () => {
                 {(!data?.auxiliary ||
                   data.auxiliary.filter(i => i.source === "Internet").length === 0) && (
                     <p style={{ textAlign: "center", opacity: 0.6, padding: "1rem" }}>
-                      No internet research sources identified.
+                      No social research sources identified.
                     </p>
                   )}
               </div>

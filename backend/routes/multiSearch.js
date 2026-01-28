@@ -81,27 +81,39 @@ async function performSearch(query) {
   // REAL INTERNET SEARCH – SERPAPI (GOOGLE)
   let internetResults = [];
   try {
+    // Enhance query for social profiles
+    const socialQuery = `${internetQuery} linkedin instagram bumble facebook twitter profile photo`.trim();
+
     const response = await axios.get("https://serpapi.com/search", {
       params: {
-        q: internetQuery,
+        q: socialQuery,
         engine: "google",
         api_key: process.env.SERPAPI_KEY,
-        num: 5
+        num: 8
       }
     });
 
     const results = response.data?.organic_results || [];
 
     results.forEach((item, index) => {
+      let provider = "Google";
+      const link = (item.link || "").toLowerCase();
+      if (link.includes("linkedin.com")) provider = "LinkedIn";
+      else if (link.includes("instagram.com")) provider = "Instagram";
+      else if (link.includes("bumble.com")) provider = "Bumble";
+      else if (link.includes("facebook.com")) provider = "Facebook";
+      else if (link.includes("twitter.com") || link.includes("x.com")) provider = "Twitter/X";
+
       internetResults.push({
         id: `google-${index}`,
         title: item.title,
         text: item.snippet,
         url: item.link,
         source: "Internet",
-        provider: "Google",
+        provider: provider,
         type: "AUX",
-        priority: 3
+        priority: 3,
+        images: item.thumbnail ? [item.thumbnail] : []
       });
     });
   } catch (err) {
