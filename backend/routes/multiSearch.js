@@ -81,15 +81,15 @@ async function performSearch(query) {
   // REAL INTERNET SEARCH – SERPAPI (GOOGLE)
   let internetResults = [];
   try {
-    // Enhance query for social profiles
-    const socialQuery = `${internetQuery} linkedin instagram bumble facebook twitter profile photo`.trim();
+    // 🔹 REFINED QUERY: Use more specific keywords to target individual profile pages
+    const socialQuery = `${internetQuery} (site:linkedin.com/in/ OR site:instagram.com OR site:facebook.com OR site:twitter.com OR site:x.com OR site:bumble.com)`.trim();
 
     const response = await axios.get("https://serpapi.com/search", {
       params: {
         q: socialQuery,
         engine: "google",
         api_key: process.env.SERPAPI_KEY,
-        num: 8
+        num: 12 // Increased to allow for filtering
       }
     });
 
@@ -98,6 +98,20 @@ async function performSearch(query) {
     results.forEach((item, index) => {
       let provider = "Google";
       const link = (item.link || "").toLowerCase();
+      const title = (item.title || "").toLowerCase();
+      const snippet = (item.snippet || "").toLowerCase();
+
+      // 🔹 FILTER: Exclude results that look like directories or search results
+      const isDirectory =
+        /\d+\+? ["'].*["'] profiles/.test(title) ||
+        title.includes("profiles |") ||
+        title.includes("search results") ||
+        link.includes("/pub/dir/") ||
+        link.includes("/search/") ||
+        snippet.includes("view the profiles of people named");
+
+      if (isDirectory) return;
+
       if (link.includes("linkedin.com")) provider = "LinkedIn";
       else if (link.includes("instagram.com")) provider = "Instagram";
       else if (link.includes("bumble.com")) provider = "Bumble";
