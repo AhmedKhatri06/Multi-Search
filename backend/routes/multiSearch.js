@@ -3,9 +3,12 @@ import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import axios from "axios";
-const internetCache = new Map();
-const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+import { identifyPeople } from "../services/aiService.js";
+
 dotenv.config();
+
+const router = express.Router();
+
 function normalize(value = "") {
   return value
     .toString()
@@ -38,79 +41,73 @@ function rankResults(results, query) {
     .sort((a, b) => b.score - a.score);
 }
 
-const router = express.Router();
-
-router.post("/", async (req, res) => {
-  const { query } = req.body;
-
-  if (!query) {
-    return res.status(400).json({ error: "Query required" });
-  }
-
+/**
+ * Core search logic combined across MongoDB, SQLite, and SerpAPI.
+ */
+async function performSearch(query) {
   // MongoDB → RECORDS
-  const mongoResults = await Document.find({
+  const mongoPromise = Document.find({
     text: { $regex: query, $options: "i" }
   }).lean();
 
   // SQLite → PROFILE
-  const sqliteResults = await sqliteSearch(query);
-  // STEP 3: Improve internet query using local profile (if found)
-  let internetQuery = query;
+  const sqlitePromise = sqliteSearch(query);
 
-  if (sqliteResults.length > 0) {
+  const [mongoResults, sqliteResults] = await Promise.all([
+    mongoPromise,
+    sqlitePromise
+  ]);
+
+  // Improve internet query using local profile (if found)
+  let internetQuery = query;
+  if (sqliteResults && sqliteResults.length > 0) {
     const p = sqliteResults[0];
     internetQuery = `${p.name} ${p.title || ""}`.trim();
   }
 
-// 🌍 REAL INTERNET SEARCH – SERPAPI (GOOGLE)
-let internetResults = [];
-
-try {
-  const response = await axios.get("https://serpapi.com/search", {
-    params: {
-      q: internetQuery,
-      engine: "google",
-      api_key: process.env.SERPAPI_KEY,
-      num: 5
-    }
-  });
-
-  const results = response.data?.organic_results || [];
-
-  results.forEach((item, index) => {
-    internetResults.push({
-      id: `google-${index}`,
-      title: item.title,
-      text: item.snippet,
-      url: item.link,
-      source: "Internet",
-      provider: "Google",
-      type: "AUX",
-      priority: 3
+  // REAL INTERNET SEARCH – SERPAPI (GOOGLE)
+  let internetResults = [];
+  try {
+    const response = await axios.get("https://serpapi.com/search", {
+      params: {
+        q: internetQuery,
+        engine: "google",
+        api_key: process.env.SERPAPI_KEY,
+        num: 5
+      }
     });
-  });
 
-} catch (err) {
-  console.error("SerpAPI search failed:", err.message);
-}
+    const results = response.data?.organic_results || [];
 
-  // ✅ STEP 8.6 – Deduplicate Internet results by URL
+    results.forEach((item, index) => {
+      internetResults.push({
+        id: `google-${index}`,
+        title: item.title,
+        text: item.snippet,
+        url: item.link,
+        source: "Internet",
+        provider: "Google",
+        type: "AUX",
+        priority: 3
+      });
+    });
+  } catch (err) {
+    console.error("SerpAPI search failed:", err.message);
+  }
+
+  // Deduplicate Internet results by URL
   const internetMap = new Map();
-
   internetResults.forEach(item => {
     if (!item.url) return;
-
     const key = normalize(item.url);
     if (!internetMap.has(key)) {
       internetMap.set(key, item);
     }
   });
-
   const dedupedInternetResults = Array.from(internetMap.values());
 
-  // ✅ STEP 8.6 – Deduplicate Local results by text
+  // Deduplicate Local results by text
   const localMap = new Map();
-
   [
     ...mongoResults.map(doc => ({
       id: doc._id,
@@ -119,7 +116,6 @@ try {
       type: "RECORD",
       priority: 2
     })),
-
     ...sqliteResults.map(doc => ({
       id: doc.id,
       text: `${doc.name} - ${doc.title}`,
@@ -134,55 +130,77 @@ try {
       localMap.set(key, item);
     }
   });
-
   const dedupedLocalResults = Array.from(localMap.values());
 
-  // Final combined results
-  const combined = [
-    ...dedupedLocalResults,
-    ...dedupedInternetResults
-  ];
-
+  const combined = [...dedupedLocalResults, ...dedupedInternetResults];
   const rankedResults = rankResults(combined, query);
-  //  Add confidence labels
-  const enrichedResults = rankedResults.map(item => {
-    let confidence = "Found Online";
 
-    if (item.type === "PROFILE" || item.type === "RECORD") {
-      confidence = "Verified (Local DB)";
-    }
+  return rankedResults;
+}
 
-    return {
-      ...item,
-      confidence
+// Main multi-search endpoint (Stage 2)
+router.post("/", async (req, res) => {
+  const { query } = req.body;
+  if (!query) return res.status(400).json({ error: "Query required" });
+
+  try {
+    const enrichedResults = await performSearch(query);
+
+    const finalResults = enrichedResults.map(item => {
+      let confidence = "Found Online";
+      if (item.type === "PROFILE" || item.type === "RECORD") {
+        confidence = "Verified (Local DB)";
+      }
+      return { ...item, confidence };
+    });
+
+    const groupedResults = {
+      profile: finalResults.filter(r => r.type === "PROFILE"),
+      records: finalResults.filter(r => r.type === "RECORD"),
+      auxiliary: finalResults.filter(r => r.type === "AUX")
     };
-  });
 
-  const groupedResults = {
-    profile: enrichedResults.filter(r => r.type === "PROFILE"),
-    records: enrichedResults.filter(r => r.type === "RECORD"),
-    auxiliary: enrichedResults.filter(r => r.type === "AUX")
-  };
+    const images = [
+      ...new Set(finalResults.flatMap(r => r.images || []).filter(Boolean))
+    ];
 
-  const images = [
-    ...new Set(enrichedResults.flatMap(r => r.images || []).filter(Boolean))
-  ];
+    res.json({
+      query,
+      total: finalResults.length,
+      images,
+      profile: groupedResults.profile,
+      records: groupedResults.records,
+      auxiliary: groupedResults.auxiliary
+    });
+  } catch (err) {
+    console.error("Multi-search failed:", err);
+    res.status(500).json({ error: "Search failed" });
+  }
+});
 
-  return res.json({
-    query,
-    total: enrichedResults.length,
-    images,
-    profile: groupedResults.profile,
-    records: groupedResults.records,
-    auxiliary: groupedResults.auxiliary,
-    rankedSources: {
-      wikipedia:
-        internetResults.find(r => r.provider === "Wikipedia") || null,
-      duckDuckGo:
-        internetResults.filter(r => r.provider === "DuckDuckGo") || []
-    }
-  });
+// New identification endpoint (Stage 1)
+router.post("/identify", async (req, res) => {
+  const { name, location, keywords } = req.body;
+  if (!name) return res.status(400).json({ error: "Name is required" });
 
+  try {
+    // Perform a broad search to gather context for AI
+    const searchQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
+    const searchResults = await performSearch(searchQuery);
+
+    // Call AI to identify candidates from results
+    const identification = await identifyPeople({
+      name,
+      location,
+      keywords,
+      searchResults
+    });
+
+    res.json(identification);
+  } catch (err) {
+    console.error("Identification failed:", err);
+    res.status(500).json({ error: "Identification failed" });
+  }
 });
 
 export default router;
