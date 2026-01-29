@@ -187,7 +187,7 @@ const MultiSearchPage = () => {
       )}
 
       {/* CANDIDATES LIST (STAGE 1) */}
-      {candidates.length > 0 && (
+      {candidates.length > 0 ? (
         <div className="results-wrapper">
           <div className="candidates-section">
             <h2 className="section-title">Who are you looking for?</h2>
@@ -210,14 +210,15 @@ const MultiSearchPage = () => {
                 </div>
               ))}
             </div>
-            <button className="search-anyway-btn" onClick={() => search(query, true)}>
+            <button className="search-anyway-btn" onClick={() => {
+              setCandidates([]);
+              search(query, true);
+            }}>
               Search for "{query}" directly instead
             </button>
           </div>
         </div>
-      )}
-
-      {data && (
+      ) : data && (
         <div className="results-wrapper">
           <div className="results-list">
 

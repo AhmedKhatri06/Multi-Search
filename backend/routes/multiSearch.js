@@ -46,9 +46,11 @@ function rankResults(results, query) {
  */
 async function performSearch(query) {
   // 1. Primary searches (Exact substring)
-  const queryWords = query.split(" ").filter(w => w.length > 2);
-  const targetName = queryWords.slice(0, 2).join(" "); // Assume first two words are the name
-  const context = queryWords.slice(2).join(" "); // Rest is context (company, title, etc.)
+  const queryWords = query.split(" ").filter(w => w.length > 1); // Allow short words like initials
+  // Try to find the name: usually the first 2-3 words. 
+  // If the query is "Pankaj SBMP", targetName should at least be "Pankaj".
+  const targetName = queryWords.length > 2 ? queryWords.slice(0, 2).join(" ") : queryWords[0] || query;
+  const context = queryWords.length > 2 ? queryWords.slice(2).join(" ") : queryWords.slice(1).join(" ");
 
   let mongoResults = await Document.find({
     text: { $regex: query, $options: "i" }
@@ -115,14 +117,14 @@ async function performSearch(query) {
       const snippet = (item.snippet || "").toLowerCase();
       const nameLower = targetName.toLowerCase();
 
-      // 🔹 PRECISION FILTER: Ensure the result is actually about the person
-
-      // 1. Must mention the person's name (or at least parts of it)
+      // 🔹 IMPROVED FILTER: More flexible name matching
       const nameParts = nameLower.split(" ");
-      const hasName = nameParts.every(part => title.includes(part) || snippet.includes(part));
-      if (!hasName) return;
+      // Must match at least the first part of the name (e.g. "Pankaj")
+      const matchesMainName = title.includes(nameParts[0]) || snippet.includes(nameParts[0]);
 
-      // 2. Filter out Directory/Search results
+      if (!matchesMainName) return;
+
+      // Filter out Directory/Search results
       const isDirectory =
         /\d+\+? ["'].*["'] profiles/.test(title) ||
         title.includes("profiles |") ||
@@ -132,16 +134,19 @@ async function performSearch(query) {
         snippet.includes("view the profiles of people named");
       if (isDirectory) return;
 
-      // 3. Filter out "Noise" (Unrelated content mentioning the name)
+      // Filter out Noise (Unrelated content mentioning the name)
       const noisePatterns = [
         "photo by", "photograph by", "congratulations to", "congrats to",
         "proud of", "event", "album", "wedding of", "funeral of",
         "in memory of", "condolences", "article by"
       ];
       const isNoise = noisePatterns.some(ptn => title.includes(ptn) || snippet.includes(ptn));
-      if (isNoise && (!context || !title.includes(context.toLowerCase().split(" ")[0]))) {
-        // Only allow "noise" if the specific professional context matches (to avoid false negatives)
-        return;
+
+      // If noise, check if context matches
+      if (isNoise) {
+        const contextParts = (context || "").toLowerCase().split(" ").filter(p => p.length > 2);
+        const hasContext = contextParts.some(p => title.includes(p) || snippet.includes(p));
+        if (!hasContext) return;
       }
 
       if (link.includes("linkedin.com")) provider = "LinkedIn";

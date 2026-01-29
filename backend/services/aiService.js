@@ -20,7 +20,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
         throw new Error("AI Service configuration error");
     }
 
-    const model = genAI.getGenerativeModel({ model: "models/gemini-2.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     const prompt = `
 You are an intelligent assistant helping me identify people. 
@@ -36,12 +36,12 @@ ${JSON.stringify(searchResults, null, 2)}
 Your task:
 
 1. Analyze this information and use the search results as context.
-2. Return a list of possible people matching this information.
+2. Return a list of possible people matching this information. If the query includes context like a company or school (e.g., "Pankaj SBMP"), prioritize results that mention those entities in the title or snippet.
 3. For each person, provide:
-   - Name
-   - Short description (role, company, or hints)
+   - Name (Use the full name found in the search result)
+   - Short description (role, company, or key identifier)
    - Location (if known)
-   - Source confidence (low / medium / high)
+   - Source confidence (low / medium / high) - "high" if name AND keywords match well.
 4. Limit the list to 3–5 people.
 5. Keep the descriptions concise and structured so I can display them in my UI for the user to select the correct person.
 6. If there is no clear match or the search results are irrelevant, return “No confident candidates found”.
