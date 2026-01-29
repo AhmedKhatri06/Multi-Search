@@ -253,30 +253,37 @@ const MultiSearchPage = () => {
               </div>
             )}
 
-            {/* 3. IMAGE GALLERY (TOP OF INTERNET) */}
+            {/* 3. IMAGE GALLERY (HORIZONTAL SWIPE) */}
             {data.images?.length > 0 && (
               <div className="card-section gallery-section">
                 <h2>Media Gallery</h2>
-                <div className="image-gallery">
-                  {data.images.map((img, idx) => (
+                <div className="image-gallery-swipe">
+                  {data.images.slice(0, 6).map((img, idx) => (
                     <div key={idx} className="gallery-item">
-                      <img src={img} alt={`Social finding ${idx}`} loading="lazy" />
+                      <img
+                        src={img}
+                        alt={`Finding ${idx}`}
+                        loading="lazy"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          e.target.style.display = 'none'; // Hide broken images
+                        }}
+                      />
                     </div>
                   ))}
                 </div>
               </div>
             )}
 
-            {/* 4. SOCIAL & INTERNET SOURCES */}
+            {/* 4. SOCIAL & INTERNET SOURCES (RESTORED TO CARDS) */}
             {internetLoaded && (
               <div className="card-section">
-                <h2>Social & Research Sources</h2>
+                <h2>Internet Results</h2>
 
-                {/* Social Handles Priority */}
                 <div className="sources-grid">
                   {data?.auxiliary
                     ?.filter(item => item.source === "Internet" && item.provider !== "Google")
-                    .map(item => (
+                    .map((item) => (
                       <a
                         key={item.id}
                         href={item.url}
@@ -285,52 +292,16 @@ const MultiSearchPage = () => {
                         className="source-card social-card"
                       >
                         <div className="source-header">
-                          <span className={`social-icon ${item.provider.toLowerCase()}`}></span>
+                          <span className={`social-icon ${item.provider.toLowerCase().split('/')[0]}`}></span>
                           <span className="source-provider">{item.provider}</span>
                         </div>
-                        <div className="source-title">{item.title || item.text}</div>
+                        <div className="source-title">{item.title || item.text?.substring(0, 50)}</div>
                         <div className="source-footer">
                           <span className="badge">Public Profile</span>
                         </div>
                       </a>
                     ))}
                 </div>
-
-                {/* Other Internet Results */}
-                <div className="sources-grid">
-                  {data?.auxiliary
-                    ?.filter(item => item.source === "Internet" && item.provider === "Google")
-                    .map(item => (
-                      <a
-                        key={item.id}
-                        href={item.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="source-card"
-                      >
-                        <div className="source-title">{item.title || item.text}</div>
-                        <div className="source-url">{item.provider}</div>
-                        <div className="source-footer">
-                          {item.confidence && (
-                            <span className="badge">{item.confidence}</span>
-                          )}
-                        </div>
-                      </a>
-                    ))}
-                </div>
-
-                {data?.auxiliary?.filter(item => item.source === "Internet" && item.text && item.text.length > 100).length > 0 && (
-                  <div className="internet-details">
-                    <h3>Detailed Findings</h3>
-                    {data.auxiliary
-                      .filter(item => item.source === "Internet" && item.text && item.text.length > 100)
-                      .map(item => (
-                        <div key={`detail-${item.id}`} className="result-item">
-                          <p>{item.text}</p>
-                        </div>
-                      ))}
-                  </div>
-                )}
 
                 {(!data?.auxiliary ||
                   data.auxiliary.filter(i => i.source === "Internet").length === 0) && (
