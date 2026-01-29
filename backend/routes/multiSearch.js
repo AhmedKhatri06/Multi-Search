@@ -47,6 +47,8 @@ function rankResults(results, query) {
 async function performSearch(query) {
   // 1. Primary searches (Exact substring)
   const queryWords = query.split(" ").filter(w => w.length > 2);
+  const targetName = queryWords.slice(0, 2).join(" "); // Assume first two words are the name
+  const context = queryWords.slice(2).join(" "); // Rest is context (company, title, etc.)
 
   let mongoResults = await Document.find({
     text: { $regex: query, $options: "i" }
@@ -81,15 +83,26 @@ async function performSearch(query) {
   // REAL INTERNET SEARCH – SERPAPI (GOOGLE)
   let internetResults = [];
   try {
-    // 🔹 REFINED QUERY: Use more specific keywords to target individual profile pages
-    const socialQuery = `${internetQuery} (site:linkedin.com/in/ OR site:instagram.com OR site:facebook.com OR site:twitter.com OR site:x.com OR site:bumble.com)`.trim();
+    // 🔹 PRECISION QUERY: Target individual profile pages specifically
+    const profileSites = [
+      "site:linkedin.com/in/",
+      "site:instagram.com",
+      "site:facebook.com",
+      "site:twitter.com",
+      "site:x.com",
+      "site:bumble.com",
+      "site:rocketreach.co/p/",
+      "site:linkedin.com/posts/"
+    ].join(" OR ");
+
+    const socialQuery = `${internetQuery} (${profileSites})`.trim();
 
     const response = await axios.get("https://serpapi.com/search", {
       params: {
         q: socialQuery,
         engine: "google",
         api_key: process.env.SERPAPI_KEY,
-        num: 12 // Increased to allow for filtering
+        num: 20 // High volume to allow for strict filtering
       }
     });
 
@@ -100,8 +113,16 @@ async function performSearch(query) {
       const link = (item.link || "").toLowerCase();
       const title = (item.title || "").toLowerCase();
       const snippet = (item.snippet || "").toLowerCase();
+      const nameLower = targetName.toLowerCase();
 
-      // 🔹 FILTER: Exclude results that look like directories or search results
+      // 🔹 PRECISION FILTER: Ensure the result is actually about the person
+
+      // 1. Must mention the person's name (or at least parts of it)
+      const nameParts = nameLower.split(" ");
+      const hasName = nameParts.every(part => title.includes(part) || snippet.includes(part));
+      if (!hasName) return;
+
+      // 2. Filter out Directory/Search results
       const isDirectory =
         /\d+\+? ["'].*["'] profiles/.test(title) ||
         title.includes("profiles |") ||
@@ -109,14 +130,26 @@ async function performSearch(query) {
         link.includes("/pub/dir/") ||
         link.includes("/search/") ||
         snippet.includes("view the profiles of people named");
-
       if (isDirectory) return;
+
+      // 3. Filter out "Noise" (Unrelated content mentioning the name)
+      const noisePatterns = [
+        "photo by", "photograph by", "congratulations to", "congrats to",
+        "proud of", "event", "album", "wedding of", "funeral of",
+        "in memory of", "condolences", "article by"
+      ];
+      const isNoise = noisePatterns.some(ptn => title.includes(ptn) || snippet.includes(ptn));
+      if (isNoise && (!context || !title.includes(context.toLowerCase().split(" ")[0]))) {
+        // Only allow "noise" if the specific professional context matches (to avoid false negatives)
+        return;
+      }
 
       if (link.includes("linkedin.com")) provider = "LinkedIn";
       else if (link.includes("instagram.com")) provider = "Instagram";
       else if (link.includes("bumble.com")) provider = "Bumble";
       else if (link.includes("facebook.com")) provider = "Facebook";
       else if (link.includes("twitter.com") || link.includes("x.com")) provider = "Twitter/X";
+      else if (link.includes("rocketreach.co")) provider = "RocketReach";
 
       internetResults.push({
         id: `google-${index}`,
