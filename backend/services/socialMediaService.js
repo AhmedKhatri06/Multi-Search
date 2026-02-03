@@ -30,11 +30,12 @@ function calculateIdentityScore(result, personName, keywords = [], location = ''
     const link = (result.link || '').toLowerCase();
     const combinedText = `${title} ${snippet}`.toLowerCase();
 
-    // Name matching (0-40 points)
+    // Name matching (0-40 points) - improved to check snippet too
     const nameParts = personName.toLowerCase().split(' ');
     let nameMatches = 0;
     nameParts.forEach(part => {
-        if (title.includes(part)) nameMatches++;
+        if (part.length < 2) return; // Skip very short parts
+        if (title.includes(part) || snippet.includes(part)) nameMatches++;
     });
     score += (nameMatches / nameParts.length) * 40;
 
@@ -106,8 +107,8 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         // Calculate identity score
         const identityScore = calculateIdentityScore(result, personName, keywords, location);
 
-        // Reject low confidence matches (< 50)
-        if (identityScore < 50) return;
+        // Reject low confidence matches (lowered from 50 to 30 for better detection)
+        if (identityScore < 30) return;
 
         // Avoid duplicates
         if (seenUrls.has(link)) return;
@@ -120,7 +121,7 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
             platform: platform.charAt(0).toUpperCase() + platform.slice(1),
             username,
             url: link,
-            confidence: identityScore >= 70 ? 'high' : 'medium',
+            confidence: identityScore >= 60 ? 'high' : identityScore >= 40 ? 'medium' : 'low',
             identityScore,
             priority: platformPriority[platform] || 99
         });
