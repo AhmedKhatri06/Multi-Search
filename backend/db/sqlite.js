@@ -1,6 +1,12 @@
 import Database from "better-sqlite3";
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
-const db = new Database("company.db");
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const dbPath = join(__dirname, '..', 'company.db');
+
+const db = new Database(dbPath);
 
 export function sqliteSearch(query) {
   // First attempt: Exact substring match

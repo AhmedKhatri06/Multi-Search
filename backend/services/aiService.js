@@ -20,7 +20,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
         throw new Error("AI Service configuration error");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
 
     const prompt = `
 You are an intelligent assistant helping me identify people. 
@@ -87,6 +87,29 @@ IMPORTANT: Return ONLY the JSON array. Do not include any markdown formatting li
         }
     } catch (error) {
         console.error("AI Service Error:", error);
+        throw error;
+    }
+};
+
+/**
+ * Generate text using Gemini AI
+ * @param {string} prompt
+ * @returns {Promise<string>}
+ */
+export const generateText = async (prompt) => {
+    if (!process.env.GEMINI_API_KEY) {
+        console.error("GEMINI_API_KEY is missing in environment variables.");
+        throw new Error("AI Service configuration error");
+    }
+
+    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+
+    try {
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        return response.text();
+    } catch (error) {
+        console.error("AI generateText Error:", error);
         throw error;
     }
 };
