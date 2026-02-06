@@ -8,8 +8,8 @@ function App() {
   return (
     <Router>
       <Routes>
-        <Route path="/" element={<NexaSearchPage />} />
-        <Route path="/multi-search" element={<MultiSearchPage />} />
+        <Route path="/" element={<MultiSearchPage />} />
+        <Route path="/nexa-search" element={<NexaSearchPage />} />
       </Routes>
     </Router>
   );

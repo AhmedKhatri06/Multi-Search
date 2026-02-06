@@ -142,13 +142,10 @@ function NexaSearchPage() {
 
             const foundCandidates = disambigResponse.data.candidates || [];
 
-            if (foundCandidates.length > 1) {
-                // Multiple candidates found - show selection
+            if (foundCandidates.length >= 1) {
+                // Candidates found - show selection list even if only one
                 setCandidates(foundCandidates);
                 setLoading(false);
-            } else if (foundCandidates.length === 1) {
-                // Single candidate - proceed directly
-                await performDeepSearch(query, foundCandidates[0].name);
             } else {
                 // No candidates - proceed with direct search
                 await performDeepSearch(query, query);
@@ -231,7 +228,7 @@ function NexaSearchPage() {
             <div className="nexa-header">
                 <div className="nexa-header-content">
 
-                    <h1 className="nexa-title">NexaSearch</h1>
+                    <h1 className="nexa-title">Multi-Search<sup>AI</sup></h1>
                 </div>
             </div>
 

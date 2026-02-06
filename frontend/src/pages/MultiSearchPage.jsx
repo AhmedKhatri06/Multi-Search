@@ -9,9 +9,19 @@ const MultiSearchPage = () => {
   const [candidates, setCandidates] = useState([]);
   const [loading, setLoading] = useState(false);
   const [isIdentifying, setIsIdentifying] = useState(false);
+  const [isSearchingDeep, setIsSearchingDeep] = useState(false); // New
   const [recent, setRecent] = useState([]);
   const [hasSearched, setHasSearched] = useState(() => localStorage.getItem("has-searched") === "true");
   const [internetLoaded, setInternetLoaded] = useState(false);
+  const [showNotFound, setShowNotFound] = useState(false); // Strict flow state
+
+  // Stage 2 State
+  const [deepData, setDeepData] = useState(null);
+
+  // Feedback Form State
+  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [feedbackData, setFeedbackData] = useState({ name: "", keyword: "", location: "" });
+  const [savingFeedback, setSavingFeedback] = useState(false);
 
   useEffect(() => {
     if (data) {
@@ -30,7 +40,10 @@ const MultiSearchPage = () => {
     localStorage.setItem("search-query", query);
     localStorage.setItem("search-data", JSON.stringify(data));
     localStorage.setItem("has-searched", hasSearched);
-  }, [query, data, hasSearched]);
+    localStorage.setItem("search-candidates", JSON.stringify(candidates));
+    localStorage.setItem("search-deepdata", JSON.stringify(deepData));
+    localStorage.setItem("search-notfound", showNotFound);
+  }, [query, data, hasSearched, candidates, deepData, showNotFound]);
 
   const getRelevanceLabel = (score = 0) => {
     if (score >= 40) return "High relevance";
@@ -45,6 +58,8 @@ const MultiSearchPage = () => {
       setIsIdentifying(true);
       setCandidates([]);
       setData(null);
+      setDeepData(null);
+      setShowNotFound(false);
       setHasSearched(true);
 
       const res = await fetch(`${API_URL}/api/multi-search/identify`, {
@@ -56,25 +71,86 @@ const MultiSearchPage = () => {
       });
 
       const result = await res.json();
-      if (Array.isArray(result)) {
+      if (Array.isArray(result) && result.length > 0) {
         setCandidates(result);
       } else {
-        console.warn("No confident candidates found.");
-        // If no candidates, maybe fallback to direct search?
-        search(query);
+        // Fallback: No candidates identified? Show general search results
+        console.log("No candidates found, falling back to general search...");
+        await search(query, true); // <--- CHANGE: Proceed to general search
       }
     } catch (err) {
       console.error("Identification failed:", err);
+      // Even on error, try broad search
+      await search(query, true);
     } finally {
       setIsIdentifying(false);
     }
   };
 
-  const handleCandidateSelect = (candidate) => {
-    const refinedQuery = `${candidate.name} ${candidate.description}`;
-    setCandidates([]);
-    // Automatically trigger deep search with internet
-    search(refinedQuery, true);
+  const handleCandidateSelect = async (candidate) => {
+    try {
+      setIsSearchingDeep(true);
+      setCandidates([]);
+      setDeepData(null);
+      setData(null);
+      setShowNotFound(false); // Clear not found state
+      setHasSearched(true);
+      setQuery(candidate.name);
+
+      const res = await fetch(`${API_URL}/api/multi-search/deep`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ person: candidate }),
+      });
+
+      const result = await res.json();
+      setDeepData(result);
+
+      const updated = [
+        candidate.name,
+        ...recent.filter(r => r !== candidate.name)
+      ].slice(0, 5);
+      setRecent(updated);
+      localStorage.setItem("recent-searches", JSON.stringify(updated));
+
+    } catch (err) {
+      console.error("DeepSearch failed:", err);
+    } finally {
+      setIsSearchingDeep(false);
+    }
+  };
+
+  const handleFeedbackSubmit = async (e) => {
+    e.preventDefault();
+    if (!feedbackData.name || !feedbackData.keyword) return;
+
+    try {
+      setSavingFeedback(true);
+      const res = await fetch(`${API_URL}/api/multi-search/forminfo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(feedbackData),
+      });
+
+      if (res.ok) {
+        setShowFeedbackForm(false);
+        setShowNotFound(false);
+        // Direct Deep Search using the provided details
+        const syntheticCandidate = {
+          name: feedbackData.name,
+          description: feedbackData.keyword,
+          location: feedbackData.location || "",
+          confidence: "manual"
+        };
+        handleCandidateSelect(syntheticCandidate);
+      }
+    } catch (err) {
+      console.error("Feedback submission failed:", err);
+    } finally {
+      setSavingFeedback(false);
+    }
   };
 
   const search = async (searchQuery = query, includeInternet = false) => {
@@ -118,105 +194,183 @@ const MultiSearchPage = () => {
   const handleReset = () => {
     setQuery("");
     setData(null);
+    setDeepData(null);
     setCandidates([]);
+    setShowNotFound(false);
     setHasSearched(false);
     setInternetLoaded(false);
     localStorage.removeItem("search-query");
     localStorage.removeItem("search-data");
     localStorage.removeItem("has-searched");
+    localStorage.removeItem("search-candidates");
+    localStorage.removeItem("search-deepdata");
+    localStorage.removeItem("search-notfound");
   };
 
   return (
-    <div className="container">
-      <h1>DeepSearch<sup>AI</sup></h1>
-      <div className="search-box">
-        {hasSearched && (
-          <button
-            className="search-back-btn"
-            onClick={handleReset}
-            title="Reset Research"
-          >
-            ←
-          </button>
-        )}
-        <input
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && (candidates.length === 0 ? handleIdentify() : search(query, true))}
-          placeholder="Ask DeepSearch to research anyone..."
-        />
-        <button
-          onClick={() => candidates.length === 0 ? handleIdentify() : search(query, true)}
-          disabled={loading || isIdentifying}
-        >
-          {loading || isIdentifying ? "Analyzing..." : "Research"}
-        </button>
+    <div className="nexa-search-page">
+      {/* Golden Header */}
+      <div className="nexa-header">
+        <div className="nexa-header-content">
+          <h1 className="nexa-title">NexaSearch</h1>
+        </div>
       </div>
 
-      {(loading || isIdentifying) && (
-        <div className="research-status">
+      {/* Search Bar */}
+      <div className="nexa-search-container">
+        <div className="nexa-search-bar">
+          {hasSearched && (
+            <button className="nexa-back-btn" onClick={handleReset} title="Reset Research">
+              ← Back
+            </button>
+          )}
+          <input
+            type="text"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && (candidates.length === 0 ? handleIdentify() : search(query, true))}
+            placeholder="Search for a person..."
+            className="nexa-search-input"
+          />
+          <button
+            className="nexa-search-btn"
+            onClick={() => candidates.length === 0 ? handleIdentify() : search(query, true)}
+            disabled={loading || isIdentifying}
+          >
+            {loading || isIdentifying ? 'Searching...' : 'SEARCH'}
+          </button>
+        </div>
+      </div>
+
+      {(loading || isIdentifying || isSearchingDeep) && (
+        <div className="research-status" style={{ justifyContent: 'center', marginTop: '1rem', color: '#00d9ff' }}>
           <div className="pulse-dot"></div>
-          {isIdentifying ? "Identifying possible matches..." : "Searching local databases and social profiles..."}
+          {isIdentifying ? "Identifying possible matches..." :
+            isSearchingDeep ? "Performing DeepSearch on selected profile..." :
+              "Searching local databases and social profiles..."}
         </div>
       )}
 
+      {/* Recent Searches - Horizontal */}
       {recent.length > 0 && !hasSearched && (
-        <div className="recent-searches">
-          <h3>Previous Reports</h3>
-          <div className="recent-items-container">
-            {recent.map(item => (
-              <div key={item} className="recent-item">
-                <span onClick={() => search(item, true)}>{item}</span>
+        <div className="nexa-recent-searches">
+          <h3>Recent Searches</h3>
+          <div className="nexa-recent-horizontal">
+            {recent.slice(0, 3).map((item, idx) => (
+              <div
+                key={idx}
+                className="nexa-recent-chip"
+                onClick={() => search(item, true)}
+              >
                 <button
-                  onClick={() => {
+                  className="nexa-chip-delete"
+                  onClick={(e) => {
+                    e.stopPropagation();
                     const filtered = recent.filter(r => r !== item);
                     setRecent(filtered);
-                    localStorage.setItem(
-                      "recent-searches",
-                      JSON.stringify(filtered)
-                    );
+                    localStorage.setItem("recent-searches", JSON.stringify(filtered));
                   }}
-                  title="Remove from history"
+                  title="Delete search"
                 >
                   ×
                 </button>
+                <span className="nexa-chip-name">{item}</span>
+                <span className="nexa-chip-time">
+                  {new Date().toLocaleDateString()}
+                </span>
               </div>
             ))}
+            {recent.length > 3 && (
+              <button className="nexa-more-btn">...</button>
+            )}
           </div>
         </div>
       )}
 
       {/* CANDIDATES LIST (STAGE 1) */}
-      {candidates.length > 0 ? (
+      {(candidates.length > 0 || showNotFound) && (
         <div className="results-wrapper">
           <div className="candidates-section">
-            <h2 className="section-title">Who are you looking for?</h2>
-            <p className="section-subtitle">Select a person to see detailed social research</p>
-            <div className="candidates-grid">
-              {candidates.map((person, idx) => (
-                <div
-                  key={idx}
-                  className="candidate-card"
-                  onClick={() => handleCandidateSelect(person)}
-                >
-                  <div className="candidate-info">
-                    <h3>{person.name}</h3>
-                    <p className="candidate-desc">{person.description}</p>
-                    {person.location && <p className="candidate-loc">📍 {person.location}</p>}
+            <h2 className="section-title">{candidates.length > 0 ? "Who are you looking for?" : "Person Not Found in Initial List"}</h2>
+            <p className="section-subtitle">
+              {candidates.length > 0
+                ? "Select a person to see detailed social research"
+                : "We couldn't identify the specific person you are looking for."}
+            </p>
+
+            {candidates.length > 0 && (
+              <div className="candidates-grid">
+                {candidates.map((person, idx) => (
+                  <div
+                    key={idx}
+                    className="candidate-card"
+                    onClick={() => handleCandidateSelect(person)}
+                  >
+                    <div className="candidate-info">
+                      <h3>{person.name}</h3>
+                      <p className="candidate-desc">{person.description}</p>
+                      {person.location && <p className="candidate-loc">📍 {person.location}</p>}
+                    </div>
+                    <div className={`candidate-confidence ${person.confidence}`}>
+                      {person.confidence} confidence
+                    </div>
                   </div>
-                  <div className={`candidate-confidence ${person.confidence}`}>
-                    {person.confidence} confidence
-                  </div>
-                </div>
-              ))}
+                ))}
+              </div>
+            )}
+
+            <div className="candidate-actions">
+              <button className="person-not-found-btn" onClick={() => {
+                setFeedbackData({ ...feedbackData, name: query });
+                setShowFeedbackForm(true);
+              }}>
+                {candidates.length > 0 ? "Person not Found?" : "Provide Details for Search"}
+              </button>
             </div>
-            <button className="search-anyway-btn" onClick={() => {
-              setCandidates([]);
-              search(query, true);
-            }}>
-              Search for "{query}" directly instead
-            </button>
           </div>
+        </div>
+      )}
+
+      {deepData ? (
+        /* DEEP SEARCH RESULTS (STAGE 2) */
+        <div className="results-wrapper deep-results">
+          <div className="deep-profile-header">
+            <div className="deep-photo-main">
+              {deepData.photo ? (
+                <img src={deepData.photo} alt={deepData.person.name} referrerPolicy="no-referrer" />
+              ) : (
+                <div className="no-photo">No Image/Photo Found</div>
+              )}
+            </div>
+            <div className="deep-profile-details">
+              <h2>{deepData.person.name}</h2>
+              <p className="deep-profession">{deepData.person.description}</p>
+              {deepData.person.location && <p className="deep-location">📍 {deepData.person.location}</p>}
+
+              <div className="deep-socials-row">
+                {deepData.socials.map((soc, i) => (
+                  <a key={i} href={soc.url} target="_blank" rel="noreferrer" className={`soc-link ${soc.provider.toLowerCase().split('/')[0]}`} title={soc.provider}>
+                    <span className={`social-icon ${soc.provider.toLowerCase().split('/')[0]}`}></span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {deepData.articles?.length > 0 && (
+            <div className="card-section deep-records">
+              <h2>Articles & Publications</h2>
+              <div className="deep-articles-list">
+                {deepData.articles.map((art, i) => (
+                  <a key={i} href={art.url} target="_blank" rel="noreferrer" className="deep-article-item">
+                    <h4>{art.title}</h4>
+                    <p>{art.snippet}</p>
+                    <span className="art-url">{new URL(art.url).hostname}</span>
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : data && (
         <div className="results-wrapper">
@@ -313,6 +467,46 @@ const MultiSearchPage = () => {
               </div>
             )}
           </div>
+        </div>
+      )}
+      {/* FEEDBACK FORM POPUP */}
+      {showFeedbackForm && (
+        <div className="modal-overlay">
+          <form className="feedback-modal" onSubmit={handleFeedbackSubmit}>
+            <h2>Help us find the right person</h2>
+            <div className="form-group">
+              <label>Name (Required)</label>
+              <input
+                type="text"
+                required
+                value={feedbackData.name}
+                onChange={e => setFeedbackData({ ...feedbackData, name: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Keyword (Doctor, Engineer, etc.) (Required)</label>
+              <input
+                type="text"
+                required
+                value={feedbackData.keyword}
+                onChange={e => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
+              />
+            </div>
+            <div className="form-group">
+              <label>Location (Optional)</label>
+              <input
+                type="text"
+                value={feedbackData.location}
+                onChange={e => setFeedbackData({ ...feedbackData, location: e.target.value })}
+              />
+            </div>
+            <div className="modal-actions">
+              <button type="button" className="cancel-btn" onClick={() => setShowFeedbackForm(false)}>Cancel</button>
+              <button type="submit" className="submit-btn" disabled={savingFeedback}>
+                {savingFeedback ? "Searching..." : "Search"}
+              </button>
+            </div>
+          </form>
         </div>
       )}
     </div>

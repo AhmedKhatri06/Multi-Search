@@ -1,6 +1,7 @@
 import express from "express";
 import dotenv from "dotenv";
 import Document from "../models/Document.js";
+import SearchCache from "../models/SearchCache.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import axios from "axios";
 import { identifyPeople } from "../services/aiService.js";
@@ -45,6 +46,15 @@ function rankResults(results, query) {
  * Core search logic combined across MongoDB, SQLite, and SerpAPI.
  */
 async function performSearch(query) {
+  const normQuery = normalize(query);
+
+  // Check Cache
+  const cached = await SearchCache.findOne({ query: normQuery, type: "SEARCH" });
+  if (cached) {
+    console.log(`[CACHE HIT] Search: "${normQuery}"`);
+    return cached.data;
+  }
+
   // 1. Primary searches (Exact substring)
   const queryWords = query.split(" ").filter(w => w.length > 1); // Allow short words like initials
   // Try to find the name: usually the first 2-3 words. 
@@ -212,10 +222,22 @@ async function performSearch(query) {
   const combined = [...dedupedLocalResults, ...dedupedInternetResults];
   const rankedResults = rankResults(combined, query);
 
-  return rankedResults;
+  const finalRanked = rankResults(combined, query);
+
+  // Save to Cache
+  try {
+    await SearchCache.create({ query: normQuery, type: "SEARCH", data: finalRanked });
+  } catch (err) {
+    // Ignore duplicate key errors silently
+    if (err.code !== 11000) console.error("Cache save failed:", err);
+  }
+
+  return finalRanked;
 }
 
-// Main multi-search endpoint (Stage 2)
+import FormInfo from "../models/FormInfo.js";
+
+// Main multi-search endpoint (Stage 2 - Baseline)
 router.post("/", async (req, res) => {
   const { query } = req.body;
   if (!query) return res.status(400).json({ error: "Query required" });
@@ -255,12 +277,20 @@ router.post("/", async (req, res) => {
   }
 });
 
-// New identification endpoint (Stage 1)
+// New Identification endpoint (Stage 1)
 router.post("/identify", async (req, res) => {
   const { name, location, keywords } = req.body;
   if (!name) return res.status(400).json({ error: "Name is required" });
 
   try {
+    const normName = normalize(name);
+    // Check Cache for Identification
+    const cached = await SearchCache.findOne({ query: normName, type: "IDENTIFY" });
+    if (cached) {
+      console.log(`[CACHE HIT] Identify: "${normName}"`);
+      return res.json(cached.data);
+    }
+
     // Perform a broad search to gather context for AI
     const searchQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
     const searchResults = await performSearch(searchQuery);
@@ -270,13 +300,93 @@ router.post("/identify", async (req, res) => {
       name,
       location,
       keywords,
+      keywords,
       searchResults
     });
+
+    // Save to Cache
+    try {
+      await SearchCache.create({ query: normName, type: "IDENTIFY", data: identification });
+    } catch (err) {
+      if (err.code !== 11000) console.error("Cache save failed:", err);
+    }
 
     res.json(identification);
   } catch (err) {
     console.error("Identification failed:", err);
     res.status(500).json({ error: "Identification failed" });
+  }
+});
+
+/**
+ * Stage 2: DeepSearch - Aggregates image, social accounts, and articles.
+ */
+router.post("/deep", async (req, res) => {
+  const { person } = req.body; // Expects { name, description, location }
+  if (!person || !person.name) return res.status(400).json({ error: "Person data required" });
+
+  try {
+    const name = person.name;
+    const profession = person.description;
+    const location = person.location || "";
+
+    // 1. Broad search for everything
+    const baseQuery = `${name} ${profession} ${location}`.trim();
+    const rawResults = await performSearch(baseQuery);
+
+    // 2. Filter images - strict matching for profile-like thumbnails
+    const images = rawResults
+      .flatMap(r => r.images || [])
+      .filter(img => img && !img.includes("gstatic")); // Filter out generic icons
+
+    // 3. Extract social accounts
+    const socialAccounts = rawResults
+      .filter(r => r.source === "Internet" && r.provider !== "Google")
+      .map(r => ({
+        provider: r.provider,
+        url: r.url,
+        title: r.title
+      }));
+
+    // 4. Extract articles (news or blog posts)
+    const articles = rawResults
+      .filter(r => r.source === "Internet" && r.provider === "Google")
+      .map(r => ({
+        title: r.title,
+        snippet: r.text,
+        url: r.url
+      }));
+
+    res.json({
+      person,
+      photo: images[0] || null,
+      socials: socialAccounts,
+      articles: articles.slice(0, 5) // Limit to top 5 articles
+    });
+  } catch (err) {
+    console.error("DeepSearch failed:", err);
+    res.status(500).json({ error: "Deep search failed" });
+  }
+});
+
+/**
+ * Handle "Person not Found" feedback
+ */
+router.post("/forminfo", async (req, res) => {
+  const { name, keyword, location } = req.body;
+  if (!name || !keyword) return res.status(400).json({ error: "Name and Keyword are required" });
+
+  try {
+    const entry = new FormInfo({
+      name,
+      Keyword: keyword,
+      Location: location || "none"
+    });
+    await entry.save();
+    res.json({ message: "Information saved successfully", entry });
+  } catch (err) {
+    console.error("Failed to save FormInfo:", err);
+    res.status(500).json({ error: "Failed to save information" });
   }
 });
 

@@ -20,48 +20,45 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
         throw new Error("AI Service configuration error");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const prompt = `
-You are an intelligent assistant helping me identify people. 
-I will give you:
+You are an expert identity research assistant. I need to identify a specific person from a list of search results.
 
+Criteria:
 - Name: ${name}
 - Location: ${location || "Not specified"}
 - Keywords: ${keywords || "Not specified"}
 
-Search Results context:
+Search Results:
 ${JSON.stringify(searchResults, null, 2)}
 
-Your task:
+Instructions:
+1. Analyze the search results to find unique individuals matching the criteria.
+2. Group results by the person they represent.
+3. For each unique person identified, provide:
+   - name: Their full name.
+   - description: A concise professional title or role (e.g., "Software Engineer", "Marketing Manager").
+   - location: Their city/country if available.
+   - confidence: "high", "medium", or "low" based on how well they match the keywords and name.
+4. Limit the list to top 5 candidates.
+5. If no candidates are found that match the name, return "No confident candidates found".
 
-1. Analyze this information and use the search results as context.
-2. Return a list of possible people matching this information. If the query includes context like a company or school (e.g., "Pankaj SBMP"), prioritize results that mention those entities in the title or snippet.
-3. For each person, provide:
-   - Name (Use the full name found in the search result)
-   - Short description (role, company, or key identifier)
-   - Location (if known)
-   - Source confidence (low / medium / high) - "high" if name AND keywords match well.
-4. Limit the list to 3–5 people.
-5. Keep the descriptions concise and structured so I can display them in my UI for the user to select the correct person.
-6. If there is no clear match or the search results are irrelevant, return “No confident candidates found”.
-
-Output format (JSON):
+Output format (JSON ARRAY ONLY):
 [
   {
-    "name": "Mihir Doshi",
-    "description": "Software Engineer at Cyhex",
+    "name": "Ahmed Khatri",
+    "description": "Student at XYZ University",
     "location": "Mumbai",
     "confidence": "high"
   },
   {
-    "name": "Mihir Doshi",
-    "description": "Business Analyst",
-    "location": "Ahmedabad",
+    "name": "Ahmed Khatri",
+    "description": "Senior Civil Engineer",
+    "location": "Dubai",
     "confidence": "medium"
   }
 ]
-IMPORTANT: Return ONLY the JSON array. Do not include any markdown formatting like \`\`\`json or explanations.
 `;
 
     try {
@@ -75,15 +72,15 @@ IMPORTANT: Return ONLY the JSON array. Do not include any markdown formatting li
         }
 
         if (text.includes("No confident candidates found")) {
-            return "No confident candidates found";
+            return [];
         }
 
         try {
             const parsed = JSON.parse(text);
-            return Array.isArray(parsed) ? parsed : "No confident candidates found";
+            return Array.isArray(parsed) ? parsed : [];
         } catch (e) {
             console.error("Failed to parse AI response as JSON:", text);
-            return "No confident candidates found";
+            return [];
         }
     } catch (error) {
         console.error("AI Service Error:", error);
@@ -102,7 +99,7 @@ export const generateText = async (prompt) => {
         throw new Error("AI Service configuration error");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-pro" });
+    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     try {
         const result = await model.generateContent(prompt);
