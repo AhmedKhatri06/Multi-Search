@@ -1,12 +1,13 @@
 import express from 'express';
 import SearchHistory from '../models/SearchHistory.js';
+import Document from '../models/Document.js'; // Added MongoDB Model
 import { searchInternet } from '../services/internetSearch.js';
 import { extractSocialAccounts } from '../services/socialMediaService.js';
 import { extractContactInfo } from '../services/contactService.js';
 
 const router = express.Router();
 
-// Disambiguation endpoint - SQLite only (no MongoDB, no AI)
+// Disambiguation endpoint - SQLite + MongoDB + Internet (combined)
 router.post('/disambiguate', async (req, res) => {
     try {
         const { query } = req.body;
@@ -15,21 +16,98 @@ router.post('/disambiguate', async (req, res) => {
             return res.status(400).json({ error: 'Query is required' });
         }
 
-        // Search SQLite only
+        // 1. Search SQLite
         const { sqliteSearch } = await import('../db/sqlite.js');
         const sqliteResults = sqliteSearch(query);
-        console.log(`[DEBUG] SQLite search for "${query}" returned ${sqliteResults.length} results:`, sqliteResults);
+        console.log(`[DEBUG] SQLite search for "${query}" returned ${sqliteResults.length} results`);
 
-        // Convert SQLite results to candidates
-        const candidates = sqliteResults.slice(0, 5).map(person => ({
-            name: person.name,
-            description: `${person.title || ''} ${person.description || ''}`.trim() || 'Person from local database',
-            location: '',
-            confidence: 'high'
-        }));
+        const candidates = [];
 
-        console.log(`Found ${candidates.length} candidates from SQLite`);
-        res.json({ candidates });
+        // Add SQLite results
+        sqliteResults.slice(0, 5).forEach(person => {
+            candidates.push({
+                name: person.name,
+                description: `${person.title || ''} ${person.description || ''}`.trim() || 'Person from local database',
+                location: 'Local Database (SQLite)',
+                confidence: 'high',
+                source: 'local_sqlite',
+                metadata: person
+            });
+        });
+
+        // 2. Search MongoDB (Local Documents)
+        try {
+            const mongoResults = await Document.find({
+                text: { $regex: query, $options: 'i' }
+            }).limit(5);
+
+            console.log(`[DEBUG] MongoDB search for "${query}" returned ${mongoResults.length} results`);
+
+            mongoResults.forEach(doc => {
+                // Create a readable title from the text (first few words)
+                const title = doc.text.substring(0, 50).split('\n')[0] + '...';
+
+                candidates.push({
+                    name: title,
+                    description: doc.text.substring(0, 150) + '...',
+                    location: 'Local Database (MongoDB)',
+                    confidence: 'high',
+                    source: 'local_mongo',
+                    metadata: doc
+                });
+            });
+        } catch (err) {
+            console.error('[DEBUG] MongoDB search failed/skipped:', err.message);
+        }
+
+        // 3. Search Internet (Improved Parsing for Multiple Candidates)
+        const internetResults = await searchInternet(query);
+        console.log(`[DEBUG] Internet search for "${query}" returned ${internetResults.length} results`);
+
+        // Helper to normalize strings for comparison
+        const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+        internetResults.forEach(result => {
+            // Basic Title Parsing: "Name - Title/Description" or "Name | Organization"
+            // e.g. "Dr. Pankaj Shah - Cardiologist - Hospital" -> Name: "Dr. Pankaj Shah", Desc: "Cardiologist - Hospital"
+            let possibleName = result.title;
+            let possibleDesc = result.snippet;
+
+            const separators = [' - ', ' | ', ':', '—'];
+            for (const sep of separators) {
+                if (result.title.includes(sep)) {
+                    const parts = result.title.split(sep);
+                    if (parts[0].length < 40) { // Assume names aren't super long
+                        possibleName = parts[0].trim();
+                        possibleDesc = parts.slice(1).join(' ').trim() || result.snippet;
+                        break;
+                    }
+                }
+            }
+
+            // Check for duplicates in existing candidates
+            const exists = candidates.some(c =>
+                normalize(c.name) === normalize(possibleName) ||
+                (c.metadata && c.metadata.url === result.link)
+            );
+
+            if (!exists) {
+                candidates.push({
+                    name: possibleName,
+                    description: possibleDesc.substring(0, 100) + (possibleDesc.length > 100 ? '...' : ''),
+                    location: 'Internet Result',
+                    confidence: 'medium',
+                    source: 'internet',
+                    metadata: { ...result, originalTitle: result.title }
+                });
+            }
+        });
+
+        // Limit total candidates to avoid overwhelming (e.g., top 8)
+        const finalCandidates = candidates.slice(0, 8);
+        console.log(`Total candidates found: ${finalCandidates.length}`);
+
+        res.json({ candidates: finalCandidates });
     } catch (error) {
         console.error('Disambiguation error:', error);
         res.status(500).json({ error: 'Failed to disambiguate query' });
@@ -54,7 +132,7 @@ router.post('/search', async (req, res) => {
             searchQuery += ' ' + location;
         }
 
-        // Search SQLite only
+        // Search SQLite
         const { sqliteSearch } = await import('../db/sqlite.js');
         const sqliteData = sqliteSearch(searchQuery);
 
@@ -64,6 +142,25 @@ router.post('/search', async (req, res) => {
             source: person.source || 'SQLite',
             metadata: person
         }));
+
+        // Search MongoDB
+        try {
+            const mongoResults = await Document.find({
+                text: { $regex: searchQuery, $options: 'i' }
+            }).limit(10);
+
+            console.log(`[DEBUG] MongoDB deep search for "${searchQuery}" returned ${mongoResults.length} results`);
+
+            mongoResults.forEach(doc => {
+                localData.push({
+                    text: doc.text,
+                    source: doc.source || 'MongoDB',
+                    metadata: doc
+                });
+            });
+        } catch (err) {
+            console.error('[DEBUG] MongoDB deep search failed:', err.message);
+        }
 
         // Search internet
         const internetResults = await searchInternet(searchQuery);

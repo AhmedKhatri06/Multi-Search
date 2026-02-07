@@ -142,14 +142,19 @@ function NexaSearchPage() {
 
             const foundCandidates = disambigResponse.data.candidates || [];
 
-            if (foundCandidates.length >= 1) {
-                // Candidates found - show selection list even if only one
-                setCandidates(foundCandidates);
-                setLoading(false);
-            } else {
-                // No candidates - proceed with direct search
-                await performDeepSearch(query, query);
+            if (foundCandidates.length === 0) {
+                // strict two-step flow: if no candidates, provide a generic option
+                foundCandidates.push({
+                    name: query,
+                    description: "No specific profiles found. Click to perform a deep search.",
+                    location: "Deep Search",
+                    confidence: "neutral"
+                });
             }
+
+            // Always show the list
+            setCandidates(foundCandidates);
+            setLoading(false);
         } catch (error) {
             console.error('Search error:', error);
             setLoading(false);

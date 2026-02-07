@@ -5,6 +5,7 @@ import SearchCache from "../models/SearchCache.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import axios from "axios";
 import { identifyPeople } from "../services/aiService.js";
+import { extractSocialAccounts } from "../services/socialMediaService.js";
 
 dotenv.config();
 
@@ -296,24 +297,83 @@ router.post("/identify", async (req, res) => {
     const searchResults = await performSearch(searchQuery);
 
     // Call AI to identify candidates from results
-    const identification = await identifyPeople({
-      name,
-      location,
-      keywords,
-      keywords,
-      searchResults
-    });
+    let identification = [];
+    try {
+      identification = await identifyPeople({
+        name,
+        location,
+        keywords,
+        searchResults
+      });
+    } catch (aiError) {
+      console.warn(`AI Identification failed (Quota/Error). Fallback: Parsing ${searchResults.length} search results manually.`);
+
+      // FALLBACK: Manually parse internet results into candidates
+      const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+      const candidates = [];
+
+      searchResults.forEach(result => {
+        // Relaxed filter: Accept any result with a title
+        if (result.title) {
+          let possibleName = result.title;
+          let possibleDesc = result.text || result.snippet || "Internet Result";
+
+          // Smarter Fallback Parser
+          // 1. Split by common separators
+          let cleanTitle = possibleName.split(/ [-|:] /)[0].trim();
+
+          // 2. Remove common social media suffixes
+          const noise = ["LinkedIn", "Twitter", "X", "Instagram", "Facebook", "TikTok", "Pinterest", "Profile", "Home", "Post", "on Twitter", "on Facebook", "on Instagram", "on LinkedIn"];
+          noise.forEach(n => {
+            // Check for " Name | LinkedIn" or " Name - Instagram" style
+            if (cleanTitle.endsWith(` ${n}`)) {
+              cleanTitle = cleanTitle.substring(0, cleanTitle.length - n.length - 1).trim();
+            }
+            // Check for "Name (LinkedIn)" style
+            if (cleanTitle.endsWith(` (${n})`)) {
+              cleanTitle = cleanTitle.substring(0, cleanTitle.length - n.length - 3).trim();
+            }
+          });
+
+          // 3. Remove generic parenthetical info from end (e.g. "Pankaj (Actor)") 
+          cleanTitle = cleanTitle.replace(/\s*\(.*?\)\s*$/, '').trim();
+
+          if (cleanTitle.length < 50 && cleanTitle.length > 2) {
+            possibleName = cleanTitle;
+          }
+
+          // Deduplicate
+          const exists = candidates.some(c => normalize(c.name) === normalize(possibleName));
+
+          if (!exists) {
+            candidates.push({
+              name: possibleName,
+              description: possibleDesc.substring(0, 150) + (possibleDesc.length > 150 ? '...' : ''),
+              location: result.provider || "Web Result",
+              confidence: result.type === 'PROFILE' ? 'high' : 'medium',
+              source: result.source || 'internet',
+              // Keep original metadata for deep search
+              metadata: result
+            });
+          }
+        }
+      });
+
+      // Ensure we explicitly add the 'Manual Search' fallback if we still have 0 or 1 candidate
+      // But allow the loop above to fill it first.
+      identification = candidates.slice(0, 15);
+    }
 
     // Save to Cache
     try {
       await SearchCache.create({ query: normName, type: "IDENTIFY", data: identification });
     } catch (err) {
-      if (err.code !== 11000) console.error("Cache save failed:", err);
+      if (err.code !== 11000) console.error("Cache save failed for identify:", err.message);
     }
 
     res.json(identification);
   } catch (err) {
-    console.error("Identification failed:", err);
+    console.error("Identification process failed:", err);
     res.status(500).json({ error: "Identification failed" });
   }
 });
@@ -339,14 +399,25 @@ router.post("/deep", async (req, res) => {
       .flatMap(r => r.images || [])
       .filter(img => img && !img.includes("gstatic")); // Filter out generic icons
 
-    // 3. Extract social accounts
-    const socialAccounts = rawResults
-      .filter(r => r.source === "Internet" && r.provider !== "Google")
+    // 3. Extract social accounts using strict service
+    // We pass the raw results (mapped to expected format if needed by service, 
+    // but the service takes 'internetResults' style objects). 
+    // performSearch returns objects with { title, text, url, provider ... }
+    // extractSocialAccounts expects { title, snippet, link ... }
+    const formattedForService = rawResults
+      .filter(r => r.source === "Internet")
       .map(r => ({
-        provider: r.provider,
-        url: r.url,
-        title: r.title
+        title: r.title,
+        snippet: r.text, // mapped from text
+        link: r.url
       }));
+
+    const socialAccounts = extractSocialAccounts(
+      formattedForService,
+      name,
+      [profession],
+      location
+    );
 
     // 4. Extract articles (news or blog posts)
     const articles = rawResults

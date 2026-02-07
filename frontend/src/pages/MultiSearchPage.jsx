@@ -71,13 +71,21 @@ const MultiSearchPage = () => {
       });
 
       const result = await res.json();
-      if (Array.isArray(result) && result.length > 0) {
-        setCandidates(result);
-      } else {
-        // Fallback: No candidates identified? Show general search results
-        console.log("No candidates found, falling back to general search...");
-        await search(query, true); // <--- CHANGE: Proceed to general search
+
+      // Strict Flow: Always show candidates list
+      let foundCandidates = Array.isArray(result) ? result : [];
+
+      if (foundCandidates.length === 0) {
+        // Fallback: Create a manual option so the user MUST select it
+        foundCandidates.push({
+          name: query,
+          description: "Click to perform a standard web & database search.",
+          location: "Deep Search",
+          confidence: "manual" // Changed to 'manual' to trigger standard search
+        });
       }
+
+      setCandidates(foundCandidates);
     } catch (err) {
       console.error("Identification failed:", err);
       // Even on error, try broad search
@@ -89,13 +97,23 @@ const MultiSearchPage = () => {
 
   const handleCandidateSelect = async (candidate) => {
     try {
-      setIsSearchingDeep(true);
       setCandidates([]);
-      setDeepData(null);
-      setData(null);
       setShowNotFound(false); // Clear not found state
       setHasSearched(true);
       setQuery(candidate.name);
+
+      // FIX: If this is a manual fallback, do a STANDARD SEARCH (Grid Results)
+      // instead of a Deep Profile Search (which might be empty).
+      if (candidate.confidence === 'manual' || candidate.location === 'Deep Search') {
+        console.log("Manual fallback selected -> Triggering standard search");
+        await search(candidate.name, true);
+        return;
+      }
+
+      // STRICT DEEP SEARCH FOR VERIFIED PROFILES
+      setIsSearchingDeep(true);
+      setDeepData(null);
+      setData(null);
 
       const res = await fetch(`${API_URL}/api/multi-search/deep`, {
         method: "POST",
@@ -228,13 +246,13 @@ const MultiSearchPage = () => {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && (candidates.length === 0 ? handleIdentify() : search(query, true))}
+            onKeyPress={(e) => e.key === 'Enter' && handleIdentify()}
             placeholder="Search for a person..."
             className="nexa-search-input"
           />
           <button
             className="nexa-search-btn"
-            onClick={() => candidates.length === 0 ? handleIdentify() : search(query, true)}
+            onClick={handleIdentify}
             disabled={loading || isIdentifying}
           >
             {loading || isIdentifying ? 'Searching...' : 'SEARCH'}
@@ -332,14 +350,16 @@ const MultiSearchPage = () => {
       )}
 
       {deepData ? (
-        /* DEEP SEARCH RESULTS (STAGE 2) */
+        /* DEEP SEARCH RESULTS (STAGE 2 - FULL PAGE) */
         <div className="results-wrapper deep-results">
+          <button className="close-deep-btn" onClick={() => setDeepData(null)}>← Back to List</button>
+
           <div className="deep-profile-header">
             <div className="deep-photo-main">
               {deepData.photo ? (
                 <img src={deepData.photo} alt={deepData.person.name} referrerPolicy="no-referrer" />
               ) : (
-                <div className="no-photo">No Image/Photo Found</div>
+                <div className="no-photo">No Image Found</div>
               )}
             </div>
             <div className="deep-profile-details">
@@ -348,11 +368,19 @@ const MultiSearchPage = () => {
               {deepData.person.location && <p className="deep-location">📍 {deepData.person.location}</p>}
 
               <div className="deep-socials-row">
-                {deepData.socials.map((soc, i) => (
-                  <a key={i} href={soc.url} target="_blank" rel="noreferrer" className={`soc-link ${soc.provider.toLowerCase().split('/')[0]}`} title={soc.provider}>
-                    <span className={`social-icon ${soc.provider.toLowerCase().split('/')[0]}`}></span>
-                  </a>
-                ))}
+                {deepData.socials.length > 0 ? (
+                  deepData.socials.map((soc, i) => {
+                    const provider = (soc.platform || soc.provider || "generic").toLowerCase();
+                    return (
+                      <a key={i} href={soc.url} target="_blank" rel="noreferrer" className={`soc-link ${provider}`} title={provider}>
+                        <span className={`social-icon ${provider}`}></span>
+                        <span className="soc-label">{soc.username || "Profile"}</span>
+                      </a>
+                    );
+                  })
+                ) : (
+                  <p className="no-deep-socials" style={{ opacity: 0.7 }}>No verified direct profile links found.</p>
+                )}
               </div>
             </div>
           </div>

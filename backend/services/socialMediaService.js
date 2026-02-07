@@ -9,10 +9,14 @@ const platformPriority = {
 };
 
 const profilePatterns = {
-    instagram: /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._]+\/?$/,
+    // Exact profile matches only - no /p/, /reel/, /stories/, /tags/
+    instagram: /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._-]+\/?$/,
+    // LinkedIn profiles - usually /in/
     linkedin: /^https?:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+\/?$/,
     github: /^https?:\/\/(www\.)?github\.com\/[a-zA-Z0-9_-]+\/?$/,
+    // Twitter/X profiles
     twitter: /^https?:\/\/(www\.)?(twitter|x)\.com\/[a-zA-Z0-9_]+\/?$/,
+    // Facebook profiles/pages (excluding posts, photos, groups, marketplace)
     facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?$/
 };
 
@@ -20,7 +24,8 @@ const disqualifyingPatterns = [
     'posted', 'shared', 'mentioned', 'tagged', 'commented', 'liked',
     'reposted', 'retweeted', 'photo by', 'video by', 'post by',
     'see photos', 'view profile of people named', 'search results',
-    '/p/', '/posts/', '/status/', '/photos/'
+    '/p/', '/posts/', '/status/', '/photos/', '/videos/', '/reel/', '/stories/',
+    '/groups/', '/marketplace/', '/watch/', '/search/', '?ref=', '/events/'
 ];
 
 function calculateIdentityScore(result, personName, keywords = [], location = '') {
