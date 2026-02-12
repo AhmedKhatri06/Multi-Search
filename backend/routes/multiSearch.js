@@ -335,9 +335,7 @@ router.post("/identify", async (req, res) => {
         console.log(`[Identify] Searching for: ${name} | Loc: ${location} | Keywords: ${keywords}`);
 
         // 1. Search Local Databases (Priority 1)
-        const localSearchQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
-        console.log(`[Identify] Local Query: ${localSearchQuery}`);
-        const sqliteResults = sqliteSearch(localSearchQuery);
+        const sqliteResults = sqliteSearch(name);
         console.log(`[Identify] SQLite Results: ${sqliteResults.length}`);
         let mongoResults = [];
         try {
