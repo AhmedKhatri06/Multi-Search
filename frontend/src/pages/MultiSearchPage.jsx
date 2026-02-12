@@ -154,7 +154,7 @@ const MultiSearchPage = () => {
         } catch (err) {
             console.error("Identification failed:", err);
             setStage(STAGES.ENTRY);
-            alert("Search service is currently unreachable. Please ensure the backend is running on port 5000.");
+            alert("Search service is currently unreachable. If you are using the deployed version, please ensure the backend is active and the API URL is configured correctly.");
         }
     };
 

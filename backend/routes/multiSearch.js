@@ -71,9 +71,14 @@ export async function performSearch(query, simpleMode = false) {
     const targetName = queryWords.length >= 2 ? queryWords.slice(0, 2).join(" ") : queryWords[0] || localSearchQuery;
     const context = queryWords.length > 2 ? queryWords.slice(2).join(" ") : "";
 
-    let mongoResults = await Document.find({
-        text: { $regex: localSearchQuery, $options: "i" }
-    }).lean();
+    let mongoResults = [];
+    try {
+        mongoResults = await Document.find({
+            text: { $regex: localSearchQuery, $options: "i" }
+        }).lean();
+    } catch (dbErr) {
+        console.warn("[MongoDB] Search failed (check MONGO_URI):", dbErr.message);
+    }
 
     let sqliteResults = await sqliteSearch(localSearchQuery);
 
@@ -334,9 +339,14 @@ router.post("/identify", async (req, res) => {
         console.log(`[Identify] Local Query: ${localSearchQuery}`);
         const sqliteResults = sqliteSearch(localSearchQuery);
         console.log(`[Identify] SQLite Results: ${sqliteResults.length}`);
-        const mongoResults = await Document.find({
-            text: { $regex: name, $options: "i" }
-        }).limit(10).lean();
+        let mongoResults = [];
+        try {
+            mongoResults = await Document.find({
+                text: { $regex: name, $options: "i" }
+            }).limit(10).lean();
+        } catch (dbErr) {
+            console.warn("[MongoDB] Identify failed (check MONGO_URI):", dbErr.message);
+        }
 
         const localCandidates = [
             ...sqliteResults.map(p => {
