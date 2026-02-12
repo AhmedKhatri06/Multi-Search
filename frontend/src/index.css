@@ -599,25 +599,268 @@ body {
   border: 2px solid var(--primary);
 }
 
-.loader-progress-bar {
-  width: 300px;
+
+/* ==========================================================================
+   Premium Loading Screen System
+   ========================================================================== */
+
+.workflow-loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg-dark);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  overflow: hidden;
+}
+
+/* Orbital Loader */
+.loader-orbit {
+  position: relative;
+  width: 240px;
+  height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4rem;
+}
+
+.loader-orbit-ring {
+  position: absolute;
+  inset: 0;
+  border: 2px solid var(--border-glass);
+  border-top: 4px solid var(--primary);
+  border-radius: 50%;
+  animation: nexa-orbit 1.5s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+  box-shadow: 0 0 40px var(--primary-glow);
+}
+
+.loader-orbit::before {
+  content: '';
+  position: absolute;
+  inset: -20px;
+  border: 1px solid rgba(0, 209, 255, 0.1);
+  border-radius: 50%;
+  animation: nexa-pulse 3s ease-in-out infinite;
+}
+
+.loader-central-image {
+  position: relative;
+  width: 140px;
+  height: 140px;
+  border-radius: 50%;
+  background: var(--bg-surface-elevated);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1px solid var(--border-glass);
+  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+}
+
+.loader-central-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.6;
+  filter: grayscale(1);
+  animation: scanner-sweep 4s linear infinite;
+}
+
+.loader-central-image::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
   height: 4px;
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--primary);
+  box-shadow: 0 0 15px var(--primary);
+  opacity: 0.5;
+  animation: scan-line 2.5s ease-in-out infinite;
+}
+
+.loader-lock-icon {
+  position: absolute;
+  bottom: 10%;
+  right: 10%;
+  background: #f59e0b;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.9rem;
+  border: 2px solid var(--bg-dark);
+  box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
+  animation: lock-float 2s ease-in-out infinite alternate;
+}
+
+/* Loading Checklist */
+.loading-checklist {
+  width: 100%;
+  max-width: 450px;
+  text-align: left;
+}
+
+.checklist-title {
+  font-size: 1.50rem;
+  font-weight: 700;
+  margin-bottom: 2rem;
+  text-align: center;
+  background: linear-gradient(to right, #fff, var(--primary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.checklist-items-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 3rem;
+}
+
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+  opacity: 0.3;
+  transform: translateX(-10px);
+  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.checklist-item.active {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.checklist-item.completed {
+  opacity: 0.6;
+  transform: translateX(0);
+}
+
+.check-circle {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--text-secondary);
+  position: relative;
+  transition: all 0.3s;
+}
+
+.checklist-item.active .check-circle {
+  border-color: var(--primary);
+  box-shadow: 0 0 15px var(--primary-glow);
+}
+
+.checklist-item.active .check-circle::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border-radius: 50%;
+  border: 1px solid var(--primary);
+  animation: ripple 1.5s infinite;
+}
+
+.checklist-item.completed .check-circle {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+
+.checklist-item span {
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+/* Progress Area */
+.loader-progress-area {
+  margin-top: 1rem;
+}
+
+.loader-progress-bar {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.05);
   border-radius: 10px;
   overflow: hidden;
-  margin-top: 2rem;
+  position: relative;
 }
 
 .loader-progress-fill {
   height: 100%;
-  background: var(--primary);
-  box-shadow: 0 0 10px var(--primary-glow);
-  transition: width 0.3s ease;
+  background: linear-gradient(90deg, var(--primary), #00ffcc);
+  box-shadow: 0 0 15px var(--primary-glow);
+  transition: width 0.8s cubic-bezier(0.1, 0.7, 1, 0.1);
 }
 
-@keyframes spin {
+/* Animations */
+@keyframes nexa-orbit {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@keyframes nexa-pulse {
+
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.1;
+  }
+
+  50% {
+    transform: scale(1.1);
+    opacity: 0.2;
+  }
+}
+
+@keyframes scan-line {
+  0% {
+    top: 0;
+  }
+
+  100% {
+    top: 100%;
+  }
+}
+
+@keyframes scanner-sweep {
+  0% {
+    filter: contrast(1) sepia(0.5) hue-rotate(180deg) brightness(0.8) grayscale(0.5);
+  }
+
+  50% {
+    filter: contrast(1.2) sepia(0.8) hue-rotate(180deg) brightness(1.1) grayscale(0);
+  }
+
+  100% {
+    filter: contrast(1) sepia(0.5) hue-rotate(180deg) brightness(0.8) grayscale(0.5);
+  }
+}
+
+@keyframes lock-float {
+  from {
+    transform: translateY(0);
+  }
+
+  to {
+    transform: translateY(-5px);
+  }
+}
+
+@keyframes ripple {
+  from {
+    transform: scale(1);
+    opacity: 1;
+  }
+
+  to {
+    transform: scale(2.5);
+    opacity: 0;
   }
 }
 

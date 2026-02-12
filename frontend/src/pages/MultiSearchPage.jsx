@@ -103,21 +103,26 @@ const MultiSearchPage = () => {
                 <div className="loader-orbit">
                     <div className="loader-orbit-ring"></div>
                     <div className="loader-central-image">
-                        <img src="/images/placeholder_person.png" alt="Searching" />
+                        <img src="/images/placeholder_person.png" alt="Scanning" />
                         <div className="loader-lock-icon">🔒</div>
                     </div>
                 </div>
 
                 <div className="loading-checklist">
                     <h3 className="checklist-title">{title}</h3>
-                    {steps.map((step, idx) => (
-                        <div key={idx} className={`checklist-item ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
-                            <div className="check-circle"></div>
-                            <span>{step}</span>
+                    <div className="checklist-items-container">
+                        {steps.map((step, idx) => (
+                            <div key={idx} className={`checklist-item ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
+                                <div className="check-circle"></div>
+                                <span>{step}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    <div className="loader-progress-area">
+                        <div className="loader-progress-bar">
+                            <div className="loader-progress-fill" style={{ width: `${progress}%` }}></div>
                         </div>
-                    ))}
-                    <div className="loader-progress-bar">
-                        <div className="loader-progress-fill" style={{ width: `${progress}%` }}></div>
                     </div>
                 </div>
             </div>
