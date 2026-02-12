@@ -9,8 +9,8 @@ backend/node_modules/
 frontend/node_modules/
 
 # Database
-company.db
-*.sqlite
+# company.db
+# *.sqlite
 
 # IDEs
 .vscode/
