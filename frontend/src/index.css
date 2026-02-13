@@ -35,7 +35,7 @@ body {
 
 /* Header */
 .nexa-header {
-  padding: 2rem 0;
+  padding: 1rem 0;
   text-align: center;
 }
 
@@ -60,7 +60,7 @@ body {
 /* Search UI */
 .nexa-search-container {
   max-width: 800px;
-  margin: 2rem auto;
+  margin: 0.5rem auto 2rem;
 }
 
 .nexa-search-bar {
@@ -93,7 +93,8 @@ body {
 
 /* Unifying Buttons */
 .nexa-search-btn,
-.nexa-back-btn {
+.nexa-back-btn,
+.search-anyway-btn {
   background: var(--primary);
   color: #000;
   border: none;
@@ -111,10 +112,50 @@ body {
 }
 
 .nexa-search-btn:hover,
-.nexa-back-btn:hover {
+.nexa-back-btn:hover,
+.search-anyway-btn:hover {
   transform: translateY(-1px);
   filter: brightness(1.1);
   box-shadow: 0 5px 15px var(--primary-glow);
+}
+
+.nexa-search-btn:active,
+.nexa-back-btn:active,
+.search-anyway-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.9);
+}
+
+.search-anyway-btn {
+  margin: 0 auto;
+}
+
+.recent-searches-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding: 0 0.5rem;
+  justify-content: center;
+}
+
+.recent-search-tag {
+  background: var(--bg-surface-elevated);
+  color: var(--text-secondary);
+  padding: 0.4rem 1rem;
+  border-radius: 20px;
+  font-size: 0.875rem;
+  cursor: pointer;
+  border: 1px solid var(--border-glass);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.recent-search-tag:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: rgba(0, 209, 255, 0.05);
+  transform: translateY(-1px);
 }
 
 /* Candidates Section */
@@ -604,6 +645,10 @@ body {
    Premium Loading Screen System
    ========================================================================== */
 
+/* ==========================================================================
+   Dark Orbital Loading Screen (Premium Theme)
+   ========================================================================== */
+
 .workflow-loading-screen {
   position: fixed;
   inset: 0;
@@ -613,188 +658,380 @@ body {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 2rem;
+  padding: 1rem;
   overflow: hidden;
+  height: 100vh;
+  width: 100vw;
+  color: var(--text-primary);
 }
 
-/* Orbital Loader */
-.loader-orbit {
-  position: relative;
-  width: 240px;
-  height: 240px;
+.loading-content-wrapper {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  margin-bottom: 4rem;
+  width: 100%;
+  max-width: 500px;
+  height: 100%;
+  max-height: 100vh;
+  gap: 0.2rem;
 }
 
-.loader-orbit-ring {
-  position: absolute;
-  inset: 0;
-  border: 2px solid var(--border-glass);
-  border-top: 4px solid var(--primary);
-  border-radius: 50%;
-  animation: nexa-orbit 1.5s cubic-bezier(0.5, 0, 0.5, 1) infinite;
-  box-shadow: 0 0 40px var(--primary-glow);
-}
-
-.loader-orbit::before {
+/* Background Glows */
+.workflow-loading-screen::before {
   content: '';
   position: absolute;
-  inset: -20px;
-  border: 1px solid rgba(0, 209, 255, 0.1);
-  border-radius: 50%;
-  animation: nexa-pulse 3s ease-in-out infinite;
+  top: 20%;
+  left: 50%;
+  width: 400px;
+  height: 400px;
+  background: radial-gradient(circle, var(--primary-glow) 0%, transparent 70%);
+  transform: translate(-50%, -50%);
+  opacity: 0.2;
+  pointer-events: none;
 }
 
-.loader-central-image {
+.loader-orbit {
   position: relative;
   width: 140px;
   height: 140px;
-  border-radius: 50%;
-  background: var(--bg-surface-elevated);
   display: flex;
   align-items: center;
   justify-content: center;
-  overflow: hidden;
-  border: 1px solid var(--border-glass);
-  box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.8);
+  margin-bottom: 0.25rem;
+  flex-shrink: 0;
 }
 
-.loader-central-image img {
+.central-persona-wrapper {
+  position: relative;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  padding: 4px;
+  background: var(--border-glass);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.5);
+  z-index: 5;
+  border: 1px solid var(--border-glass);
+}
+
+.central-persona {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  overflow: hidden;
+  position: relative;
+}
+
+.central-persona img {
   width: 100%;
   height: 100%;
   object-fit: cover;
-  opacity: 0.6;
-  filter: grayscale(1);
-  animation: scanner-sweep 4s linear infinite;
+  filter: blur(5px);
+  transform: scale(1.1);
+  opacity: 0.8;
 }
 
-.loader-central-image::after {
-  content: '';
+.persona-overlay-lock {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 4px;
-  background: var(--primary);
-  box-shadow: 0 0 15px var(--primary);
-  opacity: 0.5;
-  animation: scan-line 2.5s ease-in-out infinite;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
 }
 
-.loader-lock-icon {
-  position: absolute;
-  bottom: 10%;
-  right: 10%;
-  background: #f59e0b;
+.lock-dotted-ring {
   width: 32px;
   height: 32px;
+  border: 2px dashed var(--primary);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 0.9rem;
-  border: 2px solid var(--bg-dark);
-  box-shadow: 0 0 20px rgba(245, 158, 11, 0.4);
-  animation: lock-float 2s ease-in-out infinite alternate;
+  animation: spin-dotted 15s linear infinite;
 }
 
-/* Loading Checklist */
-.loading-checklist {
+.persona-overlay-lock span {
+  font-size: 1.5rem;
+  filter: drop-shadow(0 0 10px var(--primary-glow));
+}
+
+/* Orbiting Satellites */
+.satellite-orbit-container {
+  position: absolute;
+  inset: 0;
+  animation: master-rotate 20s linear infinite;
+}
+
+.satellite-profile {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid var(--border-glass);
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.3);
+  overflow: hidden;
+  background: var(--bg-surface-elevated);
+}
+
+.satellite-profile img {
   width: 100%;
-  max-width: 450px;
-  text-align: left;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0.9;
 }
 
-.checklist-title {
-  font-size: 1.50rem;
-  font-weight: 700;
-  margin-bottom: 2rem;
+.sat-1 {
+  top: 10%;
+  left: 25%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+.sat-2 {
+  top: 15%;
+  right: 15%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+.sat-3 {
+  top: 50%;
+  right: -2%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+.sat-4 {
+  bottom: 10%;
+  right: 20%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+.sat-5 {
+  bottom: 5%;
+  left: 30%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+.sat-6 {
+  top: 45%;
+  left: -2%;
+  animation: counter-rotate 20s linear infinite;
+}
+
+@keyframes master-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes counter-rotate {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+@keyframes spin-dotted {
+  from {
+    transform: rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Progress Area */
+.loading-info-compact {
+  width: 100%;
+  max-width: 350px;
   text-align: center;
-  background: linear-gradient(to right, #fff, var(--primary));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
+  margin-bottom: 0.5rem;
 }
 
-.checklist-items-container {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-  margin-bottom: 3rem;
+.deep-search-text {
+  font-size: 1.1rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
 }
 
-.checklist-item {
+.deep-search-text span {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+.sleek-progress-bar {
+  width: 250px;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  margin: 0 auto;
+  overflow: hidden;
+}
+
+.sleek-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  box-shadow: 0 0 15px var(--primary-glow);
+  border-radius: 10px;
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Sources Chip */
+.sources-chip-stack {
+  background: var(--bg-surface);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  padding: 0.5rem 1.25rem;
+  border-radius: 50px;
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.75rem;
+  border: 1px solid var(--border-glass);
+  margin-bottom: 0.5rem;
+}
+
+.sources-icons {
+  display: flex;
+  align-items: center;
+}
+
+.source-mini-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid var(--bg-dark);
+  margin-left: -10px;
+}
+
+.source-mini-icon:first-child {
+  margin-left: 0;
+}
+
+.sources-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Vertical Checklist */
+.vertical-checklist {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.checklist-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.15rem 0;
   opacity: 0.3;
-  transform: translateX(-10px);
-  transition: all 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.5s ease;
 }
 
-.checklist-item.active {
+.checklist-step.active {
   opacity: 1;
-  transform: translateX(0);
 }
 
-.checklist-item.completed {
+.checklist-step.completed {
   opacity: 0.6;
-  transform: translateX(0);
 }
 
-.check-circle {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  border: 2px solid var(--text-secondary);
-  position: relative;
-  transition: all 0.3s;
-}
-
-.checklist-item.active .check-circle {
-  border-color: var(--primary);
-  box-shadow: 0 0 15px var(--primary-glow);
-}
-
-.checklist-item.active .check-circle::after {
-  content: '';
-  position: absolute;
-  inset: -4px;
-  border-radius: 50%;
-  border: 1px solid var(--primary);
-  animation: ripple 1.5s infinite;
-}
-
-.checklist-item.completed .check-circle {
-  background: var(--primary);
-  border-color: var(--primary);
-}
-
-.checklist-item span {
+.step-label {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
   font-size: 1rem;
   font-weight: 500;
 }
 
-/* Progress Area */
-.loader-progress-area {
-  margin-top: 1rem;
+.step-status-icon {
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-secondary);
 }
 
-.loader-progress-bar {
-  height: 6px;
-  background: rgba(255, 255, 255, 0.05);
-  border-radius: 10px;
-  overflow: hidden;
-  position: relative;
+.checklist-step.active .step-status-icon {
+  border-color: var(--primary);
+  background: rgba(0, 209, 255, 0.1);
+  animation: nexa-pulse 1.5s infinite;
 }
 
-.loader-progress-fill {
-  height: 100%;
-  background: linear-gradient(90deg, var(--primary), #00ffcc);
-  box-shadow: 0 0 15px var(--primary-glow);
-  transition: width 0.8s cubic-bezier(0.1, 0.7, 1, 0.1);
+.checklist-step.completed .step-status-icon {
+  border-color: #22c55e;
+  background: #22c55e;
+  color: #fff;
+}
+
+.step-pill {
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  padding: 0.2rem 0.75rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* Review Card */
+.review-card-container {
+  width: 100%;
+  max-width: 400px;
+}
+
+.review-card {
+  background: var(--bg-surface-elevated);
+  backdrop-filter: blur(15px);
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-glass);
+  box-shadow: var(--shadow-premium);
+}
+
+.review-stars {
+  color: #fbbf24;
+  margin-bottom: 0.75rem;
+  font-size: 1rem;
+}
+
+.review-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.5rem;
+}
+
+.review-text {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-style: italic;
+}
+
+@media (max-width: 640px) {
+  .loader-orbit {
+    width: 240px;
+    height: 240px;
+  }
+
+  .central-persona-wrapper {
+    width: 130px;
+    height: 130px;
+  }
 }
 
 /* Animations */

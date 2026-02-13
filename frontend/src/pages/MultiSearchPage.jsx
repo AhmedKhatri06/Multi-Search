@@ -90,38 +90,87 @@ const MultiSearchPage = () => {
     }, []);
 
     const LoadingChecklist = ({ title, progress, currentStep }) => {
+        const satelliteImages = [
+            "/images/placeholder_person.png",
+            "https://i.pravatar.cc/150?u=1",
+            "https://i.pravatar.cc/150?u=2",
+            "https://i.pravatar.cc/150?u=3",
+            "https://i.pravatar.cc/150?u=4",
+            "https://i.pravatar.cc/150?u=5"
+        ];
+
         const steps = [
             "Signals captured successfully",
             "Deep dive completed",
-            "Uncovering hidden insights...",
+            "Insights uncovered",
             "Following the trail...",
             "Finalizing the search..."
         ];
 
         return (
             <div className="workflow-loading-screen">
-                <div className="loader-orbit">
-                    <div className="loader-orbit-ring"></div>
-                    <div className="loader-central-image">
-                        <img src="/images/placeholder_person.png" alt="Scanning" />
-                        <div className="loader-lock-icon">🔒</div>
-                    </div>
-                </div>
+                <div className="loading-content-wrapper">
+                    <div className="loader-orbit">
+                        <div className="satellite-orbit-container">
+                            {satelliteImages.map((src, i) => (
+                                <div key={i} className={`satellite-profile sat-${i + 1}`}>
+                                    <img src={src} alt="Source" />
+                                </div>
+                            ))}
+                        </div>
 
-                <div className="loading-checklist">
-                    <h3 className="checklist-title">{title}</h3>
-                    <div className="checklist-items-container">
+                        <div className="central-persona-wrapper">
+                            <div className="central-persona">
+                                <img src="/images/placeholder_person.png" alt="Target" />
+                                <div className="persona-overlay-lock">
+                                    <div className="lock-dotted-ring">
+                                        <span>🔒</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="loading-info-compact">
+                        <div className="deep-search-text">
+                            Deep search on <span>{query.split(' ')[0]}...</span>
+                        </div>
+
+                        <div className="sleek-progress-bar">
+                            <div className="sleek-progress-fill" style={{ width: `${progress}%` }}></div>
+                        </div>
+                    </div>
+
+                    <div className="sources-chip-stack">
+                        <div className="sources-icons">
+                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="linkedin" />
+                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/e/e7/Instagram_logo_2016.svg" alt="instagram" />
+                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/6/6c/Facebook_Logo_2023.png" alt="facebook" />
+                        </div>
+                        <div className="sources-count">+5 more sources</div>
+                    </div>
+
+                    <div className="vertical-checklist">
                         {steps.map((step, idx) => (
-                            <div key={idx} className={`checklist-item ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
-                                <div className="check-circle"></div>
-                                <span>{step}</span>
+                            <div key={idx} className={`checklist-step ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
+                                <div className="step-label">
+                                    <div className="step-status-icon">
+                                        {idx < currentStep ? '✓' : ''}
+                                    </div>
+                                    <span>{step}</span>
+                                </div>
+                                {idx === 2 && <div className="step-pill">12 found</div>}
                             </div>
                         ))}
                     </div>
 
-                    <div className="loader-progress-area">
-                        <div className="loader-progress-bar">
-                            <div className="loader-progress-fill" style={{ width: `${progress}%` }}></div>
+                    <div className="review-card-container">
+                        <div className="review-card">
+                            <div className="review-stars">★★★★★</div>
+                            <div className="review-title">Crazy Fast</div>
+                            <div className="review-text">
+                                "I typed a name and all their links popped up in seconds. No waiting."
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -276,6 +325,20 @@ const MultiSearchPage = () => {
                         />
                         <button className="nexa-search-btn" onClick={handleIdentify}>SEARCH</button>
                     </div>
+
+                    {recent.length > 0 && (
+                        <div className="recent-searches-row">
+                            {recent.map((q, idx) => (
+                                <span key={idx} className="recent-search-tag" onClick={() => {
+                                    setQuery(q);
+                                    // Trigger search immediately
+                                    setTimeout(() => handleIdentify(), 0);
+                                }}>
+                                    {q}
+                                </span>
+                            ))}
+                        </div>
+                    )}
                 </div>
             )}
 
