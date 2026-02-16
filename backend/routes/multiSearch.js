@@ -7,6 +7,8 @@ import axios from "axios";
 import { identifyPeople } from "../services/aiService.js";
 import { extractSocialAccounts } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
+import { detectInputType, normalizePhoneNumber } from "../utils/searchHelper.js";
+import { searchCSVs } from "../services/csvSearchService.js";
 
 dotenv.config();
 
@@ -327,43 +329,53 @@ router.post("/identify", async (req, res) => {
     console.log("[Identify] Endpoint Hit");
     const { name, location, keywords } = req.body;
     if (!name) {
-        console.log("[Identify] Error: Name missing");
-        return res.status(400).json({ error: "Name is required" });
+        return res.status(400).json({ error: "Search query is required" });
     }
 
     try {
-        console.log(`[Identify] Searching for: ${name} | Loc: ${location} | Keywords: ${keywords}`);
+        const inputType = detectInputType(name);
+        console.log(`[Identify] Detected Type: ${inputType} | Query: ${name}`);
 
-        // 1. Search Local Databases (Priority 1)
+        // 1. Search Local Sources (Priority 1)
+        const csvResults = await searchCSVs(name, inputType);
         const sqliteResults = sqliteSearch(name);
-        console.log(`[Identify] SQLite Results: ${sqliteResults.length}`);
+
         let mongoResults = [];
         try {
             mongoResults = await Document.find({
                 text: { $regex: name, $options: "i" }
             }).limit(10).lean();
         } catch (dbErr) {
-            console.warn("[MongoDB] Identify failed (check MONGO_URI):", dbErr.message);
+            console.warn("[MongoDB] Identify failed:", dbErr.message);
         }
 
+        // Map local data to a common candidate structure
         const localCandidates = [
+            ...csvResults.map(r => ({
+                name: r.name,
+                description: r.description || "Found in local CSV records",
+                location: r.location || "Local Records",
+                confidence: "Verified",
+                source: "local",
+                url: "",
+                image: r.image,
+                phoneNumbers: r.phoneNumbers
+            })),
             ...sqliteResults.map(p => {
                 const parts = (p.text || "").split(" - ");
-                const rowName = parts[0]?.trim() || "Unknown";
-                const rowDesc = parts.slice(1).join(" - ").trim() || "No description available";
-
                 return {
-                    name: rowName,
-                    description: rowDesc,
+                    name: parts[0]?.trim() || "Unknown",
+                    description: parts.slice(1).join(" - ").trim() || "Local profile found",
                     location: p.location || "Local Database",
                     confidence: "Verified",
                     source: "local",
                     url: p.url || "",
-                    image: p.image
+                    image: p.image,
+                    phoneNumbers: p.phone ? [p.phone] : []
                 };
             }),
             ...mongoResults.map(d => ({
-                name: name, // Use searched name as fallback for Mongo docs
+                name: inputType === "PHONE" ? "Potential Lead" : name,
                 description: d.text.substring(0, 150) + "...",
                 location: "Internal Records",
                 confidence: "Verified",
@@ -373,50 +385,48 @@ router.post("/identify", async (req, res) => {
             }))
         ];
 
-        // 2. Search Internet (Priority 2)
-        const profileSites = [
-            "site:linkedin.com/in/", "site:linkedin.com/pub/",
-            "site:instagram.com", "site:facebook.com",
-            "site:twitter.com", "site:x.com", "site:crunchbase.com/person/"
-        ].join(" OR ");
-        const internetQuery = `${name} ${location || ""} ${keywords || ""} (${profileSites})`.trim();
-
-        const searchResults = await performSearch(internetQuery, true);
-
-        // Use AI to identify candidates from internet results
+        // 2. Search Internet (Only for Names, usually)
         let internetCandidates = [];
-        try {
-            internetCandidates = await identifyPeople({
-                name,
-                location,
-                keywords,
-                searchResults
-            });
-        } catch (aiError) {
-            console.warn("AI Identification failed, using manual fallback:", aiError.message);
-            internetCandidates = (searchResults || []).filter(r => r && r.title).map(r => ({
-                name: r.title.split(/[-|]/)[0].trim(),
-                description: r.text || "No details available",
-                location: r.provider || "Web",
-                confidence: "High",
-                source: "internet",
-                url: r.url
-            }));
+        if (inputType === "NAME") {
+            const profileSites = [
+                "site:linkedin.com/in/", "site:instagram.com", "site:facebook.com",
+                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/"
+            ].join(" OR ");
+            const internetQuery = `${name} ${location || ""} ${keywords || ""} (${profileSites})`.trim();
+            const searchResults = await performSearch(internetQuery, true);
+
+            try {
+                internetCandidates = await identifyPeople({
+                    name,
+                    location,
+                    keywords,
+                    searchResults
+                });
+            } catch (aiError) {
+                internetCandidates = (searchResults || []).filter(r => r && r.title).map(r => ({
+                    name: r.title.split(/[-|]/)[0].trim(),
+                    description: r.text || "No details available",
+                    location: r.provider || "Web",
+                    confidence: "High",
+                    source: "internet",
+                    url: r.url
+                }));
+            }
         }
 
-        // 3. Combine and Deduplicate (Favoring Local)
+        // 3. Combine and Deduplicate
         const combined = [...localCandidates, ...internetCandidates];
         const dedupedMap = new Map();
 
         combined.forEach(c => {
             const normName = (c.name || "").toLowerCase().trim();
             const normUrl = (c.url || "").toLowerCase().trim();
+            // If it's a phone search, maybe deduplicate by name?
             const key = normUrl ? `${normName}||${normUrl}` : normName;
 
             if (!dedupedMap.has(key)) {
                 dedupedMap.set(key, c);
             } else {
-                // If existing is internet and new is local, replace it
                 const existing = dedupedMap.get(key);
                 if (existing.source === "internet" && c.source === "local") {
                     dedupedMap.set(key, c);
@@ -425,11 +435,11 @@ router.post("/identify", async (req, res) => {
         });
 
         const finalCandidates = Array.from(dedupedMap.values())
-            .sort((a, b) => (a.source === "local" ? -1 : 1)); // Local first
+            .sort((a, b) => (a.source === "local" ? -1 : 1));
 
         res.json(finalCandidates);
     } catch (err) {
-        console.error("Identification failed:", err.stack || err);
+        console.error("Identification failed:", err);
         res.status(500).json({ error: "Identification failed" });
     }
 });
@@ -451,51 +461,44 @@ router.post("/deep", async (req, res) => {
 
         console.log(`[Deep Search] Target: ${name} | URL: ${url}`);
 
-        // 1. Priority 1: Search Local Database
+        // 1. Priority 1: Search Local Database & CSVs
         const localResults = [];
+        const localPhones = new Set();
         try {
             const sqliteMatch = sqliteSearch(name);
             const mongoMatch = await Document.find({ text: { $regex: name, $options: "i" } }).lean();
+            const csvMatch = await searchCSVs(name, "NAME");
 
             localResults.push(...sqliteMatch.map(r => ({ ...r, source: "SQLite", priority: 1 })));
             localResults.push(...mongoMatch.map(r => ({ text: r.text, source: "MongoDB", priority: 1 })));
+            localResults.push(...csvMatch.map(r => ({ text: `${r.name} - ${r.description}`, source: "CSV", priority: 1 })));
+
+            // Extract phones for the profile
+            csvMatch.forEach(r => r.phoneNumbers.forEach(p => localPhones.add(p)));
+            sqliteMatch.forEach(p => { if (p.phone) localPhones.add(normalizePhoneNumber(p.phone)); });
         } catch (e) {
             console.warn("Local search failed during deep dive:", e);
         }
 
         // 2. Priority 2: Dual Internet Search
-        // Search 1: Social Specific (Finding Profile Cards)
         let socialQuery = `"${name}" (site:linkedin.com/in/ OR site:instagram.com OR site:facebook.com OR site:twitter.com)`;
-        if (url && url.includes("linkedin.com/in/")) {
-            const handle = url.split("/in/")[1]?.split("/")[0];
-            if (handle) socialQuery += ` ${handle}`;
-        }
-
-        // Search 2: General Search (Finding Background, Articles, Mentions)
         const cleanLocation = (location && location.toLowerCase() !== "none") ? location : "";
         const cleanProfession = (profession && profession.toLowerCase() !== "none") ? profession.substring(0, 30) : "";
         let generalQuery = `"${name}" ${cleanLocation} ${cleanProfession}`.trim();
 
-        console.log(`[Deep Search] Social Query: ${socialQuery}`);
-        console.log(`[Deep Search] General Query: ${generalQuery}`);
-
-        // Execute both searches simultaneously for speed and better coverage
         const [socialResults, generalResults] = await Promise.all([
-            performSearch(socialQuery, false, name), // Pass name to filter correctly
-            performSearch(generalQuery, true, name)  // Pass name to filter correctly
+            performSearch(socialQuery, false, name),
+            performSearch(generalQuery, true, name)
         ]);
 
         const rawInternet = [...socialResults, ...generalResults];
-
-        // Filter results to ensure they belong to the selected person
-        const targetName = name.replace(/^"|"$/g, ''); // Strip quotes from name if present
+        const targetName = name.replace(/^"|"$/g, '');
         const filteredInternet = rawInternet.filter(r => {
             if (r.source !== "Internet") return false;
             if (url && r.url.includes("linkedin.com") && !r.url.toLowerCase().includes(url.toLowerCase())) return false;
             return true;
         });
 
-        // 3. Extraction logic
         const formattedForParser = filteredInternet.map(r => ({
             title: r.title,
             snippet: r.text,
@@ -506,7 +509,6 @@ router.post("/deep", async (req, res) => {
             .map(result => parseSocialProfile(result))
             .filter(p => p !== null);
 
-        // Deduplicate socials
         const socialMap = new Map();
         socialProfiles.forEach(s => {
             const key = `${s.platform}-${s.username}`;
@@ -514,26 +516,21 @@ router.post("/deep", async (req, res) => {
         });
 
         const images = [...new Set(filteredInternet.flatMap(r => r.images || []).filter(Boolean))];
-
-        // ARTICLES/SOURCES: Include research results AND social profiles that didn't become cards
         const articles = filteredInternet
-            .filter(r => {
-                // Keep if it's NOT already in socialMap
-                const isAlreadySocial = Array.from(socialMap.values()).some(s => r.url.toLowerCase().includes(s.url.toLowerCase()));
-                return !isAlreadySocial;
-            })
+            .filter(r => !Array.from(socialMap.values()).some(s => r.url.toLowerCase().includes(s.url.toLowerCase())))
             .map(r => ({ title: r.title, snippet: r.text, url: r.url, provider: r.provider }));
 
         res.json({
-            person: { ...person, name },
+            person: {
+                ...person,
+                name,
+                phoneNumbers: Array.from(localPhones) // Unified structure
+            },
             localData: localResults,
             socials: Array.from(socialMap.values()),
             images: images.slice(0, 15),
             articles: articles.slice(0, 10),
-            aiSummary: {
-                available: false,
-                message: "AI is currently not available"
-            }
+            aiSummary: { available: false, message: "AI is currently not available" }
         });
     } catch (err) {
         console.error("Deep search failed:", err);
@@ -541,32 +538,22 @@ router.post("/deep", async (req, res) => {
     }
 });
 
-/**
- * Handle "Person not Found" feedback
- */
+// Feedback and cache management (Keep existing)
 router.post("/forminfo", async (req, res) => {
     const { name, keyword, location } = req.body;
     if (!name || !keyword) return res.status(400).json({ error: "Name and Keyword are required" });
-
     try {
-        const entry = new FormInfo({
-            name,
-            keyword: keyword,
-            location: location || ""
-        });
+        const entry = new FormInfo({ name, keyword, location: location || "" });
         await entry.save();
         res.json({ message: "Information saved successfully", entry });
     } catch (err) {
-        console.error("Failed to save FormInfo:", err);
         res.status(500).json({ error: "Failed to save information" });
     }
 });
 
-// Temporary endpoint to clear cache
 router.post("/clear-cache", async (req, res) => {
     try {
         const result = await SearchCache.deleteMany({});
-        console.log(`[ADMIN] Cache cleared: ${result.deletedCount} items`);
         res.json({ message: "Cache cleared", count: result.deletedCount });
     } catch (err) {
         res.status(500).json({ error: err.message });

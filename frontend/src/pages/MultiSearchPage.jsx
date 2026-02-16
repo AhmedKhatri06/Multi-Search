@@ -39,6 +39,22 @@ const MultiSearchPage = () => {
     // Progress Simulation State
     const [loadProgress, setLoadProgress] = useState(0);
     const [currentStep, setCurrentStep] = useState(0);
+    const [revealedNumbers, setRevealedNumbers] = useState(new Set());
+
+    const toggleReveal = (phone) => {
+        setRevealedNumbers(prev => {
+            const next = new Set(prev);
+            if (next.has(phone)) next.delete(phone);
+            else next.add(phone);
+            return next;
+        });
+    };
+
+    const maskPhone = (phone) => {
+        if (!phone) return "";
+        if (phone.length <= 4) return "****";
+        return phone.slice(0, 2) + "*******" + phone.slice(-3);
+    };
 
     // Simulated Progress Logic
     useEffect(() => {
@@ -110,7 +126,7 @@ const MultiSearchPage = () => {
                         <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                 </button>
-                <div className="loading-content-wrapper" style={{ textAlign: 'center' }}>
+                <div className="loading-content-wrapper">
                     <div className="loader-orbit">
                         <div className="loader-orbit-ring"></div>
                         <div className="central-persona-wrapper">
@@ -218,7 +234,7 @@ const MultiSearchPage = () => {
                 setCandidates(grouped);
                 setStage(STAGES.SELECTING);
             } else {
-                console.log("No candidates found or invalid response:", result);
+                console.log("[Search] No candidates found. Triggering Precision Search.");
                 setStage(STAGES.ENTRY);
                 setShowFeedbackForm(true);
             }
@@ -296,11 +312,24 @@ const MultiSearchPage = () => {
         setDeepData(null);
         setCandidates([]);
         setShowFeedbackForm(false);
-        // Clear persistence
-        localStorage.removeItem("nexa-stage");
+        // Clear all persistent states
+        localStorage.removeItem("lookup-stage");
         localStorage.removeItem("search-query");
         localStorage.removeItem("nexa-candidates");
         localStorage.removeItem("nexa-deep-data");
+        localStorage.removeItem("recent-searches");
+    };
+
+    const handleGoBack = () => {
+        if (stage === STAGES.DASHBOARD) {
+            setStage(STAGES.SELECTING);
+            setDeepData(null);
+            localStorage.setItem("lookup-stage", STAGES.SELECTING);
+            localStorage.removeItem("nexa-deep-data");
+        } else if (stage === STAGES.SELECTING) {
+            setStage(STAGES.ENTRY);
+            localStorage.setItem("lookup-stage", STAGES.ENTRY);
+        }
     };
 
     const handleCancel = () => {
@@ -395,7 +424,9 @@ const MultiSearchPage = () => {
                 {stage === STAGES.SELECTING && (
                     <div className="selecting-view" style={{ padding: '4rem 0' }}>
                         <div className="animate-fade-up" style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <button className="nav-btn secondary" onClick={handleReset} style={{ border: '1px solid var(--border-light)' }}>← Back</button>
+                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span>←</span> Back to Search
+                            </button>
                             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>Potential intel matches</h2>
                         </div>
                         <div className="candidates-grid">
@@ -416,13 +447,28 @@ const MultiSearchPage = () => {
                                             <p className="card-desc">{person.description || "No description available"}</p>
                                         )}
 
-                                        <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                            {person.sources && person.sources.map((src, i) => (
-                                                <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 0.8 }}>
-                                                    📍 {src}
-                                                </span>
-                                            ))}
-                                            {!person.sources && person.location && <p className="card-desc" style={{ fontSize: '0.8rem', opacity: 0.8 }}>📍 {person.location}</p>}
+                                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                            {person.phoneNumbers && person.phoneNumbers.length > 0 && (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                    <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 600 }}>
+                                                        📞 {revealedNumbers.has(person.phoneNumbers[0]) ? person.phoneNumbers[0] : maskPhone(person.phoneNumbers[0])}
+                                                    </div>
+                                                    <button
+                                                        className="reveal-btn-sm"
+                                                        onClick={(e) => { e.stopPropagation(); toggleReveal(person.phoneNumbers[0]); }}
+                                                    >
+                                                        {revealedNumbers.has(person.phoneNumbers[0]) ? "Hide" : "Show"}
+                                                    </button>
+                                                </div>
+                                            )}
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                                {person.sources && person.sources.map((src, i) => (
+                                                    <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 0.8 }}>
+                                                        📍 {src}
+                                                    </span>
+                                                ))}
+                                                {!person.sources && person.location && <p className="card-desc" style={{ fontSize: '0.8rem', opacity: 0.8 }}>📍 {person.location}</p>}
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
@@ -438,6 +484,11 @@ const MultiSearchPage = () => {
                 {/* 3. Dashboard View (Two-Column SaaS Layout) */}
                 {stage === STAGES.DASHBOARD && deepData && (
                     <div className="results-container">
+                        <div className="animate-fade-up" style={{ gridColumn: '1 / -1', marginBottom: '2rem' }}>
+                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span>←</span> Return to matches
+                            </button>
+                        </div>
                         {/* LEFT: Sticky AI Insights Sidebar */}
                         <aside className="sticky-sidebar animate-fade-up">
                             <div className="ai-insight-panel">
@@ -489,16 +540,33 @@ const MultiSearchPage = () => {
                                         <span className="field-value">{deepData.person.name}</span>
                                     </div>
                                     <div className="identity-field">
+                                        <span className="field-label">Verified Numbers</span>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                            {deepData.person.phoneNumbers && deepData.person.phoneNumbers.length > 0
+                                                ? deepData.person.phoneNumbers.map((p, i) => (
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                        <span className="field-value" style={{ fontFamily: 'monospace', letterSpacing: '1px' }}>
+                                                            {revealedNumbers.has(p) ? p : maskPhone(p)}
+                                                        </span>
+                                                        <button
+                                                            className="reveal-btn-sm"
+                                                            onClick={() => toggleReveal(p)}
+                                                            style={{ padding: '2px 8px', fontSize: '0.7rem' }}
+                                                        >
+                                                            {revealedNumbers.has(p) ? "Hide" : "Show"}
+                                                        </button>
+                                                    </div>
+                                                ))
+                                                : <span className="field-value">Restricted Access</span>}
+                                        </div>
+                                    </div>
+                                    <div className="identity-field">
                                         <span className="field-label">Active Presence</span>
                                         <span className="field-value">{deepData.socials.length} Platforms</span>
                                     </div>
                                     <div className="identity-field">
                                         <span className="field-label">Profession</span>
-                                        <span className="field-value">{deepData.person.description.split(',')[0]}</span>
-                                    </div>
-                                    <div className="identity-field">
-                                        <span className="field-label">Public Access</span>
-                                        <span className="field-value">Restricted Content</span>
+                                        <span className="field-value">{deepData.person.description || "Professional Entity"}</span>
                                     </div>
                                 </div>
                             </div>
