@@ -514,16 +514,6 @@ const MultiSearchPage = () => {
                                 </div>
                             </div>
 
-                            <div className="ai-insight-panel" style={{ background: 'var(--bg-subtle)', boxShadow: 'none' }}>
-                                <h4 style={{ fontSize: '0.875rem', fontWeight: 800, marginBottom: '1rem', color: 'var(--text-soft)' }}>TIMELINE</h4>
-                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                                    {recent.map((q, idx) => (
-                                        <div key={idx} className="timeline-item" style={{ padding: '0.75rem', background: '#fff', borderRadius: 'var(--radius-md)', fontSize: '0.875rem', border: '1px solid var(--border-light)' }} onClick={() => { setQuery(q); setTimeout(() => handleIdentify(), 0) }}>
-                                            {q}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
                         </aside>
 
                         {/* RIGHT: Categorized structured results */}
