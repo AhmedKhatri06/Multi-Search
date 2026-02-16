@@ -13,7 +13,7 @@ const MultiSearchPage = () => {
         DASHBOARD: "DASHBOARD"
     };
 
-    const [stage, setStage] = useState(() => localStorage.getItem("nexa-stage") || STAGES.ENTRY);
+    const [stage, setStage] = useState(() => localStorage.getItem("lookup-stage") || STAGES.ENTRY);
     const [query, setQuery] = useState(() => localStorage.getItem("search-query") || "");
     const [data, setData] = useState(null);
     const [candidates, setCandidates] = useState(() => {
@@ -68,7 +68,7 @@ const MultiSearchPage = () => {
 
     // Persistence Sync
     useEffect(() => {
-        localStorage.setItem("nexa-stage", stage);
+        localStorage.setItem("lookup-stage", stage);
     }, [stage]);
 
     useEffect(() => {
@@ -89,16 +89,7 @@ const MultiSearchPage = () => {
         setRecent(saved);
     }, []);
 
-    const LoadingChecklist = ({ title, progress, currentStep }) => {
-        const satelliteImages = [
-            "/images/placeholder_person.png",
-            "https://i.pravatar.cc/150?u=1",
-            "https://i.pravatar.cc/150?u=2",
-            "https://i.pravatar.cc/150?u=3",
-            "https://i.pravatar.cc/150?u=4",
-            "https://i.pravatar.cc/150?u=5"
-        ];
-
+    const LoadingChecklist = ({ title, progress, currentStep, onCancel }) => {
         const steps = [
             "Signals captured successfully",
             "Deep dive completed",
@@ -109,31 +100,30 @@ const MultiSearchPage = () => {
 
         return (
             <div className="workflow-loading-screen">
-                <div className="loading-content-wrapper">
-                    <div className="loader-orbit">
-                        <div className="satellite-orbit-container">
-                            {satelliteImages.map((src, i) => (
-                                <div key={i} className={`satellite-profile sat-${i + 1}`}>
-                                    <img src={src} alt="Source" />
-                                </div>
-                            ))}
-                        </div>
+                {/* Background Animation Nodes */}
+                <div className="bg-nodes-container">
+                    {[...Array(6)].map((_, i) => <div key={i} className="bg-node" style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animationDelay: `${i * 0.5}s` }}></div>)}
+                </div>
 
+                <button className="cancel-query-btn" onClick={onCancel} title="Cancel Search">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                        <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                    </svg>
+                </button>
+                <div className="loading-content-wrapper" style={{ textAlign: 'center' }}>
+                    <div className="loader-orbit">
+                        <div className="loader-orbit-ring"></div>
                         <div className="central-persona-wrapper">
-                            <div className="central-persona">
-                                <img src="/images/placeholder_person.png" alt="Target" />
-                                <div className="persona-overlay-lock">
-                                    <div className="lock-dotted-ring">
-                                        <span>🔒</span>
-                                    </div>
-                                </div>
-                            </div>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                                <circle cx="12" cy="7" r="4" />
+                            </svg>
                         </div>
                     </div>
 
                     <div className="loading-info-compact">
                         <div className="deep-search-text">
-                            Deep search on <span>{query.split(' ')[0]}...</span>
+                            Intelligence Deep Dive on <span>{query}</span>
                         </div>
 
                         <div className="sleek-progress-bar">
@@ -141,41 +131,68 @@ const MultiSearchPage = () => {
                         </div>
                     </div>
 
-                    <div className="sources-chip-stack">
-                        <div className="sources-icons">
-                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/c/ca/LinkedIn_logo_initials.png" alt="linkedin" />
-                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/e/e7/Instagram_logo_2016.svg" alt="instagram" />
-                            <img className="source-mini-icon" src="https://upload.wikimedia.org/wikipedia/commons/6/6c/Facebook_Logo_2023.png" alt="facebook" />
-                        </div>
-                        <div className="sources-count">+5 more sources</div>
-                    </div>
-
                     <div className="vertical-checklist">
                         {steps.map((step, idx) => (
                             <div key={idx} className={`checklist-step ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
-                                <div className="step-label">
-                                    <div className="step-status-icon">
-                                        {idx < currentStep ? '✓' : ''}
-                                    </div>
-                                    <span>{step}</span>
+                                <div className="step-status-icon">
+                                    {idx < currentStep ? (
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
+                                            <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+                                        </svg>
+                                    ) : idx === currentStep ? (
+                                        <div className="loader-dot-pulse"></div>
+                                    ) : null}
                                 </div>
-                                {idx === 2 && <div className="step-pill">12 found</div>}
+                                <span style={{ opacity: idx === currentStep ? 1 : 0.8 }}>{step}</span>
                             </div>
                         ))}
-                    </div>
-
-                    <div className="review-card-container">
-                        <div className="review-card">
-                            <div className="review-stars">★★★★★</div>
-                            <div className="review-title">Crazy Fast</div>
-                            <div className="review-text">
-                                "I typed a name and all their links popped up in seconds. No waiting."
-                            </div>
-                        </div>
                     </div>
                 </div>
             </div>
         );
+    };
+
+    const groupCandidates = (data) => {
+        // Sort by name length descending so we favor longer, more descriptive names as bases
+        const sortedData = [...data].sort((a, b) => (b.name || "").length - (a.name || "").length);
+        const groups = [];
+
+        sortedData.forEach(item => {
+            const name = (item.name || "").toLowerCase().trim();
+            if (!name) return;
+
+            let matchedGroup = groups.find(group => {
+                const groupName = group.name.toLowerCase().trim();
+                // Merge if one name is a substring of another OR they share a significant prefix
+                // Minimum 4 characters to avoid generic matches like "a" or "the"
+                return (groupName.includes(name) || name.includes(groupName)) && name.length >= 4;
+            });
+
+            if (matchedGroup) {
+                // Merge unique descriptions
+                if (item.description && item.description !== 'No description available') {
+                    if (!matchedGroup.descriptions.includes(item.description)) {
+                        matchedGroup.descriptions.push(item.description);
+                    }
+                }
+                // Merge unique sources
+                const itemSource = item.source || "Unknown";
+                if (!matchedGroup.sources.includes(itemSource)) {
+                    matchedGroup.sources.push(itemSource);
+                }
+                // Keep the longer name
+                if (item.name.length > matchedGroup.name.length) {
+                    matchedGroup.name = item.name;
+                }
+            } else {
+                groups.push({
+                    ...item,
+                    descriptions: (item.description && item.description !== 'No description available') ? [item.description] : [],
+                    sources: [item.source || "Unknown"]
+                });
+            }
+        });
+        return groups;
     };
 
     const handleIdentify = async () => {
@@ -183,7 +200,6 @@ const MultiSearchPage = () => {
         setStage(STAGES.IDENTIFYING);
         setCandidates([]);
 
-        // Use configured URL or fallback to localhost:5000
         const baseUrl = API_URL || "http://localhost:5000";
 
         try {
@@ -198,7 +214,8 @@ const MultiSearchPage = () => {
             const result = await res.json();
 
             if (Array.isArray(result) && result.length > 0) {
-                setCandidates(result);
+                const grouped = groupCandidates(result);
+                setCandidates(grouped);
                 setStage(STAGES.SELECTING);
             } else {
                 console.log("No candidates found or invalid response:", result);
@@ -286,301 +303,326 @@ const MultiSearchPage = () => {
         localStorage.removeItem("nexa-deep-data");
     };
 
+    const handleCancel = () => {
+        handleReset();
+    };
+
     const openPreview = (url, platform) => {
         setPreviewUrl(url);
         setPreviewPlatform(platform);
     };
 
     return (
-        <div className="nexa-search-page">
-            {stage === STAGES.IDENTIFYING && (
-                <LoadingChecklist title={`Collecting signals for ${query}...`} progress={loadProgress} currentStep={currentStep} />
-            )}
-
-            {stage === STAGES.DEEP_LOADING && (
-                <LoadingChecklist title={`Deep search on ${candidates.find(c => true)?.name || query}...`} progress={loadProgress} currentStep={currentStep} />
-            )}
-
-            {/* Header */}
-            <div className="nexa-header">
-                <div className="nexa-header-content">
-                    <h1 className="nexa-title">Look<sup>UP</sup></h1>
+        <div className="saas-layout">
+            {/* Top Navigation: Professional SaaS Header */}
+            <nav className="navbar">
+                <div className="nav-logo" onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '50px', objectFit: 'contain' }} />
                 </div>
-            </div>
 
-            {/* Search Section (Entry & Selecting) */}
-            {(stage === STAGES.ENTRY || stage === STAGES.SELECTING) && (
-                <div className="nexa-search-container">
-                    <div className="nexa-search-bar">
-                        {stage === STAGES.SELECTING && (
-                            <button className="nexa-back-btn" onClick={handleReset}>← Back</button>
-                        )}
-                        <input
-                            type="text"
-                            value={query}
-                            onChange={(e) => setQuery(e.target.value)}
-                            onKeyPress={(e) => e.key === 'Enter' && handleIdentify()}
-                            placeholder="Search for a person..."
-                            className="nexa-search-input"
-                        />
-                        <button className="nexa-search-btn" onClick={handleIdentify}>SEARCH</button>
-                    </div>
-
-                    {recent.length > 0 && (
-                        <div className="recent-searches-row">
-                            {recent.map((q, idx) => (
-                                <span key={idx} className="recent-search-tag" onClick={() => {
-                                    setQuery(q);
-                                    // Trigger search immediately
-                                    setTimeout(() => handleIdentify(), 0);
-                                }}>
-                                    {q}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Selecting View (Stage 3) */}
-            {stage === STAGES.SELECTING && (
-                <div className="results-wrapper">
-                    <div className="candidates-section">
-                        <h2 className="section-title">Who are you looking for?</h2>
-                        <div className="candidates-grid">
-                            {candidates.map((person, idx) => (
-                                <div key={idx} className="candidate-card" onClick={() => handleCandidateSelect(person)}>
-                                    <div className="candidate-info">
-                                        <h3>{person.name}</h3>
-                                        <p className="candidate-desc">{person.description}</p>
-                                        {person.location && <p className="candidate-loc">📍 {person.location}</p>}
-                                    </div>
-                                    <div className={`candidate-confidence ${person.confidence?.toLowerCase()}`}>
-                                        {person.confidence}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                        <button className="search-anyway-btn" onClick={() => {
-                            setFeedbackData({ name: query, keyword: "", location: "" });
-                            setShowFeedbackForm(true);
-                        }}>
-                            Person not Found?
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Dashboard View (Stage 5) */}
-            {stage === STAGES.DASHBOARD && deepData && (
-                <div className="results-wrapper deep-results container">
-                    <div className="nexa-search-container" style={{ marginBottom: '3rem' }}>
-                        <div className="nexa-search-bar">
-                            <button className="nexa-back-btn" onClick={() => setStage(STAGES.SELECTING)}>← Back</button>
+                <div className="nav-search-container">
+                    {stage !== STAGES.ENTRY && (
+                        <div className="nav-search-bar">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ color: 'var(--text-muted)' }}>
+                                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                            </svg>
                             <input
-                                type="text"
+                                className="nav-search-input"
+                                placeholder="Search new target..."
                                 value={query}
                                 onChange={(e) => setQuery(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleIdentify()}
-                                placeholder="Search for another person..."
-                                className="nexa-search-input"
+                                onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
                             />
-                            <button className="nexa-search-btn" onClick={handleIdentify}>SEARCH</button>
-                        </div>
-                    </div>
-
-                    <div className="card-section">
-                        <div className="card-header">
-                            <div className="card-header-icon">
-                                <span style={{ width: '12px' }}></span>
-                                <span style={{ width: '8px' }}></span>
-                                <span style={{ width: '16px' }}></span>
-                            </div>
-                            <h3>Gallery</h3>
-                        </div>
-                        <div className="image-gallery-swipe">
-                            {deepData.images && deepData.images.length > 0 ? (
-                                deepData.images.map((img, idx) => (
-                                    <div key={idx} className="gallery-item">
-                                        <img src={img} alt="Portrait" onError={(e) => e.target.parentElement.style.display = 'none'} />
-                                    </div>
-                                ))
-                            ) : (
-                                <div className="gallery-item placeholder">
-                                    <img src="/images/placeholder_person.png" alt="No images found" />
-                                </div>
-                            )}
-                        </div>
-                    </div>
-
-                    <div className="verification-prompt">
-                        <p>Is this the person you were looking for?</p>
-                        <div className="verification-buttons">
-                            <button className="verify-btn yes">Yes, this is them</button>
-                            <button className="verify-btn no" onClick={() => {
-                                setFeedbackData({ name: deepData.person.name, keyword: "", location: "" });
-                                setShowFeedbackForm(true);
-                            }}>No, search again</button>
-                        </div>
-                    </div>
-
-                    <div className="card-section">
-                        <div className="card-header">
-                            <div className="card-header-icon">
-                                <span style={{ width: '8px' }}></span>
-                                <span style={{ width: '16px' }}></span>
-                                <span style={{ width: '12px' }}></span>
-                            </div>
-                            <h3>Sources</h3>
-                        </div>
-
-                        <div className="sources-chips-grid">
-                            {[...deepData.socials, ...(deepData.articles || [])].map((source, i) => {
-                                const url = source.url;
-                                const domain = (() => {
-                                    try { return new URL(url).hostname.replace('www.', ''); }
-                                    catch (e) { return source.platform || "source"; }
-                                })();
-                                const title = source.username || source.handle || source.title || "View Source";
-
-                                return (
-                                    <a key={i} href={url} target="_blank" rel="noreferrer" className="source-chip">
-                                        <img
-                                            src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-                                            alt=""
-                                            className="source-chip-favicon"
-                                            onError={(e) => e.target.style.display = 'none'}
-                                        />
-                                        <div className="source-chip-info">
-                                            <span className="source-chip-title">{title}</span>
-                                            <div className="source-chip-footer">
-                                                <span className="source-chip-domain">{domain}</span>
-                                                <span className="source-chip-number">{i + 1}</span>
-                                            </div>
-                                        </div>
-                                    </a>
-                                );
-                            })}
-                        </div>
-                    </div>
-
-                    {/* Local Evidence Section */}
-                    {deepData.localData && deepData.localData.length > 0 && (
-                        <div className="card-section local-data-section">
-                            <h2>📂 Internal Records</h2>
-                            <div className="full-sources-list">
-                                {deepData.localData.map((item, idx) => (
-                                    <div key={idx} className="candidate-card" style={{ cursor: 'default', borderStyle: 'dashed' }}>
-                                        <div className="candidate-info">
-                                            <h3>{item.source} Record</h3>
-                                            <p className="candidate-desc">{item.text.substring(0, 200)}...</p>
-                                        </div>
-                                        <span className="badge verified">Verified Internal</span>
-                                    </div>
-                                ))}
-                            </div>
                         </div>
                     )}
+                </div>
 
-                    <div className="card-section ai-summary-section">
-                        <h2>✨ AI Insights</h2>
-                        <div className="summary-container">
-                            <p className="summary-text">{deepData.aiSummary?.message || "Synthesizing professional background..."}</p>
-                        </div>
-                    </div>
+                <div className="nav-actions">
+                    <button className="nav-btn secondary">Support</button>
+                    <button className="nav-btn primary">Account</button>
+                </div>
+            </nav>
 
-                    <div className="card-section">
-                        <div className="related-queries">
-                            <div className="card-header">
-                                <div className="card-header-icon">
-                                    <span style={{ width: '16px' }}></span>
-                                    <span style={{ width: '12px' }}></span>
-                                    <span style={{ width: '10px' }}></span>
-                                </div>
-                                <h3>Related</h3>
-                            </div>
+            {/* Global Loading Overlay */}
+            {(stage === STAGES.IDENTIFYING || stage === STAGES.DEEP_LOADING) && (
+                <LoadingChecklist
+                    title={stage === STAGES.IDENTIFYING ? "Initial identification..." : "Deep intelligence dive..."}
+                    progress={loadProgress}
+                    currentStep={currentStep}
+                    onCancel={handleCancel}
+                />
+            )}
 
-                            {[
-                                `Who is ${deepData.person.name}?`,
-                                `${deepData.person.name} professional background`,
-                                `What is ${deepData.person.name}'s profession?`,
-                                `Does ${deepData.person.name} have an online portfolio?`,
-                                `What are ${deepData.person.name}'s interests?`
-                            ].map((q, idx) => (
-                                <button key={idx} className="related-query-btn" onClick={() => {
-                                    setQuery(q);
-                                    handleIdentify();
-                                }}>
-                                    <span>{q}</span>
-                                    <span className="arrow">→</span>
+            <main className="container">
+                {/* 1. Home View (Hero Focus) */}
+                {stage === STAGES.ENTRY && (
+                    <div className="home-view">
+                        <div className="hero-box">
+                            <div className="hero-search-container animate-fade-up">
+                                <input
+                                    className="hero-search-input"
+                                    placeholder="Enter name, email, or digital identity..."
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
+                                    autoFocus
+                                />
+                                <button className="hero-search-btn" onClick={handleIdentify}>
+                                    Run Intelligence
                                 </button>
-                            ))}
-
-                            <div className="follow-up-container">
-                                <div className="follow-up-bar">
-                                    <span className="follow-up-icon">🔗</span>
-                                    <input type="text" placeholder="Ask a follow-up" />
+                            </div>
+                            <span className="hero-tag animate-fade-up">Unified Intelligence Platform</span>
+                            <h1 className="hero-title animate-fade-up">High-performance data intelligence</h1>
+                            <div className="trust-indicators animate-fade-up">
+                                <div className="indicator">
+                                    <div className="indicator-dot"></div>
+                                    <span>Multi-source intelligence</span>
                                 </div>
-                                <div className="follow-up-action">
-                                    💬
+                                <div className="indicator">
+                                    <div className="indicator-dot"></div>
+                                    <span>AI-powered insights</span>
+                                </div>
+                                <div className="indicator">
+                                    <div className="indicator-dot"></div>
+                                    <span>Real-time results</span>
                                 </div>
                             </div>
                         </div>
                     </div>
+                )}
+
+                {/* 2. Selecting View (Structured Candidates) */}
+                {stage === STAGES.SELECTING && (
+                    <div className="selecting-view" style={{ padding: '4rem 0' }}>
+                        <div className="animate-fade-up" style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                            <button className="nav-btn secondary" onClick={handleReset} style={{ border: '1px solid var(--border-light)' }}>← Back</button>
+                            <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>Potential intel matches</h2>
+                        </div>
+                        <div className="candidates-grid">
+                            {candidates.map((person, idx) => (
+                                <div key={idx} className="saas-card animate-scale-in" onClick={() => handleCandidateSelect(person)} style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
+                                    <div className="card-icon" style={{ marginTop: '0.25rem' }}>👤</div>
+                                    <div className="card-body">
+                                        <div className="card-meta">{person.confidence} Accuracy</div>
+                                        <h3 className="card-title">{person.name}</h3>
+
+                                        {person.descriptions && person.descriptions.length > 0 ? (
+                                            <ul className="card-desc-list">
+                                                {person.descriptions.map((desc, i) => (
+                                                    <li key={i}>{desc}</li>
+                                                ))}
+                                            </ul>
+                                        ) : (
+                                            <p className="card-desc">{person.description || "No description available"}</p>
+                                        )}
+
+                                        <div style={{ marginTop: '0.75rem', display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                                            {person.sources && person.sources.map((src, i) => (
+                                                <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 0.8 }}>
+                                                    📍 {src}
+                                                </span>
+                                            ))}
+                                            {!person.sources && person.location && <p className="card-desc" style={{ fontSize: '0.8rem', opacity: 0.8 }}>📍 {person.location}</p>}
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="animate-fade-up" style={{ marginTop: '3rem', textAlign: 'center' }}>
+                            <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Don't see who you're looking for?</p>
+                            <button className="nav-btn secondary" onClick={() => setShowFeedbackForm(true)} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>Provide more details</button>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3. Dashboard View (Two-Column SaaS Layout) */}
+                {stage === STAGES.DASHBOARD && deepData && (
+                    <div className="results-container">
+                        {/* LEFT: Sticky AI Insights Sidebar */}
+                        <aside className="sticky-sidebar animate-fade-up">
+                            <div className="ai-insight-panel">
+                                <div className="ai-badge">✨ AI SUMMARY</div>
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '1rem' }}>{deepData.person.name}</h2>
+                                <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: 'var(--text-soft)', marginBottom: '2rem' }}>
+                                    {deepData.aiSummary?.message || "Synthesizing deep-search findings for this entity background."}
+                                </p>
+
+                                <div className="attribute-grid">
+                                    <div className="attr-item">
+                                        <span className="attr-label">Location</span>
+                                        <span className="attr-value">{deepData.person.location || "North America"}</span>
+                                    </div>
+                                    <div className="attr-item">
+                                        <span className="attr-label">Primary Field</span>
+                                        <span className="attr-value">{deepData.person.description.split(',')[0]}</span>
+                                    </div>
+                                    <div className="attr-item">
+                                        <span className="attr-label">Confidence Score</span>
+                                        <span className="attr-value">{deepData.person.confidence}</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div className="ai-insight-panel" style={{ background: 'var(--bg-subtle)', boxShadow: 'none' }}>
+                                <h4 style={{ fontSize: '0.875rem', fontWeight: 800, marginBottom: '1rem', color: 'var(--text-soft)' }}>TIMELINE</h4>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                                    {recent.map((q, idx) => (
+                                        <div key={idx} className="timeline-item" style={{ padding: '0.75rem', background: '#fff', borderRadius: 'var(--radius-md)', fontSize: '0.875rem', border: '1px solid var(--border-light)' }} onClick={() => { setQuery(q); setTimeout(() => handleIdentify(), 0) }}>
+                                            {q}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </aside>
+
+                        {/* RIGHT: Categorized structured results */}
+                        <section className="results-feed">
+                            {/* Category: Digital Identity */}
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">Digital Identity Card</h3>
+                                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '30px', objectFit: 'contain' }} />
+                                </div>
+                                <div className="identity-card-grid" style={{ background: '#fff' }}>
+                                    <div className="identity-field">
+                                        <span className="field-label">Preferred Name</span>
+                                        <span className="field-value">{deepData.person.name}</span>
+                                    </div>
+                                    <div className="identity-field">
+                                        <span className="field-label">Active Presence</span>
+                                        <span className="field-value">{deepData.socials.length} Platforms</span>
+                                    </div>
+                                    <div className="identity-field">
+                                        <span className="field-label">Profession</span>
+                                        <span className="field-value">{deepData.person.description.split(',')[0]}</span>
+                                    </div>
+                                    <div className="identity-field">
+                                        <span className="field-label">Public Access</span>
+                                        <span className="field-value">Restricted Content</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            {/* Category: Media Gallery */}
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">Media Verification</h3>
+                                    <span className="category-count">{deepData.images?.length || 0} Items</span>
+                                </div>
+                                <div className="gallery-slider">
+                                    {deepData.images && deepData.images.length > 0 ? (
+                                        deepData.images.map((img, idx) => (
+                                            <img key={idx} src={img} className="gallery-thumbnail" alt="Evidence" onClick={() => openPreview(img, 'Media')} style={{ cursor: 'pointer' }} />
+                                        ))
+                                    ) : (
+                                        <div className="gallery-thumbnail" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: 'var(--text-muted)' }}>
+                                            No Media Data
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Category: Social Footprint */}
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">Platform Footprint</h3>
+                                    <span className="category-count">{deepData.socials.length} Sources</span>
+                                </div>
+                                <div className="social-grid">
+                                    {deepData.socials.map((social, i) => (
+                                        <a key={i} href={social.url} target="_blank" rel="noreferrer" className="saas-card animate-scale-in" style={{ padding: '1rem', alignItems: 'center' }}>
+                                            <div className="card-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>🔗</div>
+                                            <div className="card-body">
+                                                <div className="card-meta" style={{ fontSize: '0.65rem' }}>{social.platform}</div>
+                                                <div className="card-title" style={{ fontSize: '0.9375rem', marginBottom: 0 }}>{social.handle || "Profile"}</div>
+                                            </div>
+                                        </a>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Category: Internal Archive */}
+                            {deepData.localData && deepData.localData.length > 0 && (
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">Internal Archive Records</h3>
+                                        <span className="category-count">{deepData.localData.length} Dossiers</span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                        {deepData.localData.map((item, idx) => (
+                                            <div key={idx} className="saas-card animate-scale-in" style={{ display: 'block' }}>
+                                                <div className="card-meta">SOURCE ID: {item.source}</div>
+                                                <p className="card-desc" style={{ marginTop: '0.5rem' }}>{item.text}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </section>
+                    </div>
+                )}
+            </main>
+
+            {/* Mobile Sticky CTA */}
+            {stage !== STAGES.ENTRY && (
+                <div className="mobile-sticky-search" onClick={handleReset}>
+                    <button className="mobile-search-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                        </svg>
+                        Start New Search
+                    </button>
                 </div>
             )}
 
-            {/* Stage 6: Preview Modal */}
+            {/* Modals & Overlays */}
             {previewUrl && (
-                <div className="modal-overlay" onClick={() => setPreviewUrl(null)}>
-                    <div className="feedback-modal" style={{ maxWidth: '90%', height: '80vh', padding: 0, overflow: 'hidden' }} onClick={e => e.stopPropagation()}>
-                        <div style={{ padding: '1rem', background: '#1a1a1c', borderBottom: '1px solid var(--border-glass)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase' }}>{previewPlatform} Preview</span>
-                            <button onClick={() => setPreviewUrl(null)} style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '1.5rem', cursor: 'pointer' }}>×</button>
+                <div className="modal-overlay" onClick={() => setPreviewUrl(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(4px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+                    <div className="preview-modal" style={{ background: '#fff', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: '1000px', height: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ padding: '1.25rem 2rem', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontWeight: 800 }}>{previewPlatform} Intelligence</span>
+                            <button onClick={() => setPreviewUrl(null)} style={{ background: '#f1f5f9', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontWeight: 700 }}>×</button>
                         </div>
-                        <iframe src={previewUrl} style={{ width: '100%', height: 'calc(100% - 60px)', border: 'none' }} title="Preview" />
+                        <iframe src={previewUrl} style={{ flex: 1, border: 'none' }} title="Preview" />
                     </div>
                 </div>
             )}
 
-            {/* Feedback Modal */}
             {showFeedbackForm && (
-                <div className="modal-overlay">
-                    <form className="feedback-modal" onSubmit={handleFeedbackSubmit}>
-                        <h2 className="section-title" style={{ textAlign: 'left', marginBottom: '1rem' }}>Help us improve</h2>
-                        <p style={{ color: 'var(--text-secondary)', marginBottom: '2rem' }}>Provide more context to narrow down the search.</p>
-                        <div className="form-group">
-                            <label>Full Name</label>
-                            <input
-                                type="text"
-                                value={feedbackData.name}
-                                onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
-                                required
-                            />
+                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(8px)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }} onClick={() => setShowFeedbackForm(false)}>
+                    <form className="saas-card" onSubmit={handleFeedbackSubmit} style={{ maxWidth: '480px', width: '100%', flexDirection: 'column', padding: '3rem', position: 'relative', zIndex: 9001 }} onClick={e => e.stopPropagation()}>
+                        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.5rem' }}>Precision Search</h2>
+                        <p style={{ color: 'var(--text-soft)', marginBottom: '2rem', fontSize: '0.9375rem' }}>Provide additional attributes to improve target identification.</p>
+
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>FULL NAME</label>
+                                <input
+                                    className="hero-search-input"
+                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
+                                    value={feedbackData.name}
+                                    onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
+                                    autoFocus
+                                    required
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>ORGANIZATION / PROFESSION</label>
+                                <input
+                                    className="hero-search-input"
+                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
+                                    value={feedbackData.keyword}
+                                    onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
+                                    placeholder="e.g. Recruiter at Nexa"
+                                    required
+                                />
+                            </div>
                         </div>
-                        <div className="form-group">
-                            <label>Profession / Company</label>
-                            <input
-                                type="text"
-                                value={feedbackData.keyword}
-                                onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
-                                placeholder="e.g. Senior Developer at Google"
-                                required
-                            />
-                        </div>
-                        <div className="form-group">
-                            <label>Location</label>
-                            <input
-                                type="text"
-                                value={feedbackData.location}
-                                onChange={(e) => setFeedbackData({ ...feedbackData, location: e.target.value })}
-                                placeholder="e.g. San Francisco, CA"
-                            />
-                        </div>
-                        <div className="modal-actions">
-                            <button type="button" className="cancel-btn" onClick={() => setShowFeedbackForm(false)}>Cancel</button>
-                            <button type="submit" className="submit-btn" disabled={savingFeedback}>
-                                {savingFeedback ? "Synthesizing..." : "Search Again"}
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '3rem' }}>
+                            <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel</button>
+                            <button type="submit" className="nav-btn primary" disabled={savingFeedback}>
+                                {savingFeedback ? "Synthesizing..." : "Initiate Intelligence Search"}
                             </button>
                         </div>
                     </form>
