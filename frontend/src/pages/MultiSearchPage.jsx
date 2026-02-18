@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import "../index.css";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -13,7 +13,27 @@ const MultiSearchPage = () => {
         DASHBOARD: "DASHBOARD"
     };
 
+    const SEARCH_MODES = {
+        GENERAL: "GENERAL",
+        PHONE: "PHONE"
+    };
+
+    const COUNTRIES = [
+        { code: 'AF', name: 'Afghanistan', flag: '🇦🇫', prefix: '+93' },
+        { code: 'AL', name: 'Albania', flag: '🇦🇱', prefix: '+355' },
+        { code: 'DZ', name: 'Algeria', flag: '🇩🇿', prefix: '+213' },
+        { code: 'AS', name: 'American Samoa', flag: '🇦🇸', prefix: '+1' },
+        { code: 'AD', name: 'Andorra', flag: '🇦🇩', prefix: '+376' },
+        { code: 'AO', name: 'Angola', flag: '🇦🇴', prefix: '+244' },
+        { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', prefix: '+44' },
+        { code: 'US', name: 'United States', flag: '🇺🇸', prefix: '+1' },
+        { code: 'IN', name: 'India', flag: '🇮🇳', prefix: '+91' },
+    ].sort((a, b) => b.prefix.length - a.prefix.length); // Match longest prefix first
+
     const [stage, setStage] = useState(() => localStorage.getItem("lookup-stage") || STAGES.ENTRY);
+    const [searchMode, setSearchMode] = useState(SEARCH_MODES.GENERAL);
+    const [selectedCountry, setSelectedCountry] = useState(COUNTRIES[0]);
+    const [showCountryDropdown, setShowCountryDropdown] = useState(false);
     const [query, setQuery] = useState(() => localStorage.getItem("search-query") || "");
     const [data, setData] = useState(null);
     const [candidates, setCandidates] = useState(() => {
@@ -26,6 +46,27 @@ const MultiSearchPage = () => {
         return saved ? JSON.parse(saved) : null;
     });
     const [recent, setRecent] = useState([]);
+    const countryDropdownRef = useRef(null);
+
+    useEffect(() => {
+        const handleClickOutside = (event) => {
+            if (countryDropdownRef.current && !countryDropdownRef.current.contains(event.target)) {
+                setShowCountryDropdown(false);
+            }
+        };
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
+
+    // Auto-Country Detection
+    useEffect(() => {
+        if (searchMode === SEARCH_MODES.PHONE && query.startsWith('+')) {
+            const matched = COUNTRIES.find(c => query.startsWith(c.prefix));
+            if (matched && matched.code !== selectedCountry.code) {
+                setSelectedCountry(matched);
+            }
+        }
+    }, [query, searchMode, COUNTRIES, selectedCountry]);
 
     // Stage 6: Preview Modal
     const [previewUrl, setPreviewUrl] = useState(null);
@@ -216,13 +257,15 @@ const MultiSearchPage = () => {
         setStage(STAGES.IDENTIFYING);
         setCandidates([]);
 
-        const baseUrl = API_URL || "http://localhost:5000";
+        const finalQuery = searchMode === SEARCH_MODES.PHONE
+            ? (query.startsWith('+') ? query : `${selectedCountry.prefix}${query}`)
+            : query;
 
         try {
             const res = await fetch(`${baseUrl}/api/multi-search/identify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: query }),
+                body: JSON.stringify({ name: finalQuery }),
             });
 
             if (!res.ok) throw new Error(`API failed with status ${res.status}`);
@@ -387,10 +430,48 @@ const MultiSearchPage = () => {
                 {stage === STAGES.ENTRY && (
                     <div className="home-view">
                         <div className="hero-box">
-                            <div className="hero-search-container animate-fade-up">
+                            <div className={`hero-search-container animate-fade-up ${searchMode === SEARCH_MODES.PHONE ? 'phone-mode' : ''}`}>
+                                <div className="mode-toggle-wrapper">
+                                    <button
+                                        className={`mode-btn ${searchMode === SEARCH_MODES.GENERAL ? 'active' : ''}`}
+                                        onClick={() => setSearchMode(SEARCH_MODES.GENERAL)}
+                                        title="General Search"
+                                    >
+                                        🔍
+                                    </button>
+                                    <button
+                                        className={`mode-btn ${searchMode === SEARCH_MODES.PHONE ? 'active' : ''}`}
+                                        onClick={() => setSearchMode(SEARCH_MODES.PHONE)}
+                                        title="Number Search"
+                                    >
+                                        📞
+                                    </button>
+                                </div>
+
+                                {searchMode === SEARCH_MODES.PHONE && (
+                                    <div className="country-selector-box" ref={countryDropdownRef}>
+                                        <div className="phone-prefix" onClick={() => setShowCountryDropdown(!showCountryDropdown)}>
+                                            <span className="flag">{selectedCountry.flag}</span>
+                                            <span className="prefix">{selectedCountry.prefix}</span>
+                                            <span className="chevron">▼</span>
+                                        </div>
+                                        {showCountryDropdown && (
+                                            <div className="country-dropdown">
+                                                {COUNTRIES.map((c) => (
+                                                    <div key={c.code} className="country-option" onClick={() => { setSelectedCountry(c); setShowCountryDropdown(false); }}>
+                                                        <span className="option-flag">{c.flag}</span>
+                                                        <span className="option-name">{c.name}</span>
+                                                        <span className="option-prefix">{c.prefix}</span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 <input
                                     className="hero-search-input"
-                                    placeholder="Enter name, email, or digital identity..."
+                                    placeholder={searchMode === SEARCH_MODES.PHONE ? "Enter mobile number..." : "Enter name, email, or digital identity..."}
                                     value={query}
                                     onChange={(e) => setQuery(e.target.value)}
                                     onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
@@ -530,7 +611,7 @@ const MultiSearchPage = () => {
                                         <span className="field-value">{deepData.person.name}</span>
                                     </div>
                                     <div className="identity-field">
-                                        <span className="field-label">Verified Numbers</span>
+                                        <span className="field-label">                                                                  Numbers</span>
                                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                                             {deepData.person.phoneNumbers && deepData.person.phoneNumbers.length > 0
                                                 ? deepData.person.phoneNumbers.map((p, i) => (
