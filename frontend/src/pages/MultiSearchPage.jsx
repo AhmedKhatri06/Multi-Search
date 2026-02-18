@@ -471,6 +471,8 @@ const MultiSearchPage = () => {
 
                                 <input
                                     className="hero-search-input"
+                                    type={searchMode === SEARCH_MODES.PHONE ? "tel" : "text"}
+                                    inputMode={searchMode === SEARCH_MODES.PHONE ? "tel" : "text"}
                                     placeholder={searchMode === SEARCH_MODES.PHONE ? "Enter mobile number..." : "Enter name, email, or digital identity..."}
                                     value={query}
                                     onChange={(e) => setQuery(e.target.value)}
