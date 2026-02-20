@@ -3,6 +3,7 @@ import dotenv from "dotenv";
 import Document from "../models/Document.js";
 import SearchCache from "../models/SearchCache.js";
 import { sqliteSearch } from "../db/sqlite.js";
+
 import axios from "axios";
 import { identifyPeople } from "../services/aiService.js";
 import { extractSocialAccounts } from "../services/socialMediaService.js";
@@ -82,7 +83,7 @@ export async function performSearch(query, simpleMode = false) {
         console.warn("[MongoDB] Search failed (check MONGO_URI):", dbErr.message);
     }
 
-    let sqliteResults = await sqliteSearch(localSearchQuery);
+    let sqliteResults = sqliteSearch(localSearchQuery);
 
     // 2. Fallback: Keyword search
     if (mongoResults.length === 0 && queryWords.length >= 2) {
@@ -338,7 +339,8 @@ router.post("/identify", async (req, res) => {
 
         // 1. Search Local Sources (Priority 1)
         const csvResults = await searchCSVs(name, inputType);
-        const sqliteResults = sqliteSearch(name);
+        const { sqliteSearch: internalSqliteSearch } = await import("../db/sqlite.js");
+        const sqliteResults = internalSqliteSearch(name);
 
         let mongoResults = [];
         try {

@@ -63,4 +63,4 @@ export function sqliteSearch(query) {
   }
 }
 
-export default { sqliteSearch };
+// No default export needed for named exports

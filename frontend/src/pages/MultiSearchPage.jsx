@@ -261,8 +261,9 @@ const MultiSearchPage = () => {
             ? (query.startsWith('+') ? query : `${selectedCountry.prefix}${query}`)
             : query;
 
+        const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
-            const res = await fetch(`${baseUrl}/api/multi-search/identify`, {
+            const res = await fetch(`${VITE_API_URL}/api/multi-search/identify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ name: finalQuery }),
@@ -290,9 +291,9 @@ const MultiSearchPage = () => {
 
     const handleCandidateSelect = async (candidate) => {
         setStage(STAGES.DEEP_LOADING);
-        const baseUrl = API_URL || "http://localhost:5000";
+        const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
-            const res = await fetch(`${baseUrl}/api/multi-search/deep`, {
+            const res = await fetch(`${VITE_API_URL}/api/multi-search/deep`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ person: candidate }),
@@ -318,10 +319,10 @@ const MultiSearchPage = () => {
         e.preventDefault();
         if (!feedbackData.name || !feedbackData.keyword) return;
 
-        const baseUrl = API_URL || "http://localhost:5000";
+        const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
             setSavingFeedback(true);
-            const res = await fetch(`${baseUrl}/api/multi-search/forminfo`, {
+            const res = await fetch(`${VITE_API_URL}/api/multi-search/forminfo`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(feedbackData),
@@ -389,22 +390,27 @@ const MultiSearchPage = () => {
             {/* Top Navigation: Professional SaaS Header */}
             <nav className="navbar">
                 <div className="nav-logo" onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '50px', objectFit: 'contain' }} />
+                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '60px', objectFit: 'contain' }} />
                 </div>
 
                 <div className="nav-search-container">
                     {stage !== STAGES.ENTRY && (
-                        <div className="nav-search-bar">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ color: 'var(--text-muted)' }}>
-                                <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-                            </svg>
-                            <input
-                                className="nav-search-input"
-                                placeholder="Search new target..."
-                                value={query}
-                                onChange={(e) => setQuery(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
-                            />
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', padding: '6px 12px', fontSize: '0.8rem', background: '#fff', borderRadius: 'var(--radius-md)', height: '40px' }}>
+                                ← Back
+                            </button>
+                            <div className="nav-search-bar">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ color: 'var(--text-muted)' }}>
+                                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+                                </svg>
+                                <input
+                                    className="nav-search-input"
+                                    placeholder="Search new target..."
+                                    value={query}
+                                    onChange={(e) => setQuery(e.target.value)}
+                                    onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
+                                />
+                            </div>
                         </div>
                     )}
                 </div>
@@ -506,10 +512,7 @@ const MultiSearchPage = () => {
                 {/* 2. Selecting View (Structured Candidates) */}
                 {stage === STAGES.SELECTING && (
                     <div className="selecting-view" style={{ padding: '4rem 0' }}>
-                        <div className="animate-fade-up" style={{ marginBottom: '2rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span>←</span> Back to Search
-                            </button>
+                        <div className="animate-fade-up" style={{ marginBottom: '2rem' }}>
                             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>Potential intel matches</h2>
                         </div>
                         <div className="candidates-grid">
@@ -566,83 +569,56 @@ const MultiSearchPage = () => {
 
                 {/* 3. Dashboard View (Two-Column SaaS Layout) */}
                 {stage === STAGES.DASHBOARD && deepData && (
-                    <div className="results-container">
-                        <div className="animate-fade-up" style={{ gridColumn: '1 / -1', marginBottom: '2rem' }}>
-                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <span>←</span> Return to matches
-                            </button>
-                        </div>
+                    <div className="results-container" style={{ paddingTop: '0' }}>
                         {/* LEFT: Sticky AI Insights Sidebar */}
                         <aside className="sticky-sidebar animate-fade-up">
                             <div className="ai-insight-panel">
-                                <div className="ai-badge">✨ AI SUMMARY</div>
-                                <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '1rem' }}>{deepData.person.name}</h2>
-                                <p style={{ fontSize: '0.9375rem', lineHeight: 1.6, color: 'var(--text-soft)', marginBottom: '2rem' }}>
-                                    {deepData.aiSummary?.message || "Synthesizing deep-search findings for this entity background."}
+                                <div className="ai-badge" style={{ marginBottom: '1rem' }}>✨ INTEL SUMMARY</div>
+                                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '0.75rem' }}>{deepData.person.name}</h2>
+                                <p style={{ fontSize: '0.875rem', lineHeight: 1.6, color: 'var(--text-soft)', marginBottom: '1.5rem' }}>
+                                    {deepData.aiSummary?.message || "Aggregated intelligence profile reconstructed from multiple distributed data sources."}
                                 </p>
 
-                                <div className="attribute-grid">
+                                <div className="attribute-grid" style={{ paddingTop: '1.5rem', borderTop: '1px solid var(--border-light)' }}>
                                     <div className="attr-item">
-                                        <span className="attr-label">Location</span>
-                                        <span className="attr-value">{deepData.person.location || "North America"}</span>
-                                    </div>
-                                    <div className="attr-item">
-                                        <span className="attr-label">Primary Field</span>
-                                        <span className="attr-value">{deepData.person.description.split(',')[0]}</span>
+                                        <span className="attr-label">Probable Location</span>
+                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.person.location || "Undisclosed / Multi-regional"}</span>
                                     </div>
                                     <div className="attr-item">
-                                        <span className="attr-label">Confidence Score</span>
-                                        <span className="attr-value">{deepData.person.confidence}</span>
+                                        <span className="attr-label">Intelligence Status</span>
+                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.person.confidence} Accuracy</span>
                                     </div>
-                                </div>
-                            </div>
-
-                        </aside>
-
-                        {/* RIGHT: Categorized structured results */}
-                        <section className="results-feed">
-                            {/* Category: Digital Identity */}
-                            <div className="category-section animate-fade-up">
-                                <div className="category-header">
-                                    <h3 className="category-title">Digital Identity Card</h3>
-                                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '30px', objectFit: 'contain' }} />
-                                </div>
-                                <div className="identity-card-grid" style={{ background: '#fff' }}>
-                                    <div className="identity-field">
-                                        <span className="field-label">Preferred Name</span>
-                                        <span className="field-value">{deepData.person.name}</span>
-                                    </div>
-                                    <div className="identity-field">
-                                        <span className="field-label">                                                                  Numbers</span>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                                    <div className="attr-item">
+                                        <span className="attr-label">Communication Nodes</span>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
                                             {deepData.person.phoneNumbers && deepData.person.phoneNumbers.length > 0
                                                 ? deepData.person.phoneNumbers.map((p, i) => (
-                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                                                        <span className="field-value" style={{ fontFamily: 'monospace', letterSpacing: '1px' }}>
+                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                        <span className="field-value" style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem' }}>
                                                             {revealedNumbers.has(p) ? p : maskPhone(p)}
                                                         </span>
                                                         <button
                                                             className="reveal-btn-sm"
                                                             onClick={() => toggleReveal(p)}
-                                                            style={{ padding: '2px 8px', fontSize: '0.7rem' }}
+                                                            style={{ padding: '0 6px', fontSize: '0.6rem', height: '18px' }}
                                                         >
                                                             {revealedNumbers.has(p) ? "Hide" : "Show"}
                                                         </button>
                                                     </div>
                                                 ))
-                                                : <span className="field-value">Restricted Access</span>}
+                                                : <span className="attr-value" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>None Detected</span>}
                                         </div>
                                     </div>
-                                    <div className="identity-field">
-                                        <span className="field-label">Active Presence</span>
-                                        <span className="field-value">{deepData.socials.length} Platforms</span>
-                                    </div>
-                                    <div className="identity-field">
-                                        <span className="field-label">Profession</span>
-                                        <span className="field-value">{deepData.person.description || "Professional Entity"}</span>
+                                    <div className="attr-item">
+                                        <span className="attr-label">Digital Presence</span>
+                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.socials.length} Active Platform Nodes</span>
                                     </div>
                                 </div>
                             </div>
+                        </aside>
+
+                        {/* RIGHT: Categorized structured results */}
+                        <section className="results-feed">
 
                             {/* Category: Media Gallery */}
                             <div className="category-section animate-fade-up">
@@ -686,14 +662,19 @@ const MultiSearchPage = () => {
                             {deepData.localData && deepData.localData.length > 0 && (
                                 <div className="category-section animate-fade-up">
                                     <div className="category-header">
-                                        <h3 className="category-title">Internal Archive Records</h3>
-                                        <span className="category-count">{deepData.localData.length} Dossiers</span>
+                                        <h3 className="category-title">Internal Archive Dossiers</h3>
+                                        <span className="category-count">{deepData.localData.length} Records</span>
                                     </div>
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
                                         {deepData.localData.map((item, idx) => (
-                                            <div key={idx} className="saas-card animate-scale-in" style={{ display: 'block' }}>
-                                                <div className="card-meta">SOURCE ID: {item.source}</div>
-                                                <p className="card-desc" style={{ marginTop: '0.5rem' }}>{item.text}</p>
+                                            <div key={idx} className="saas-card animate-scale-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'relative' }}>
+                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                    <span className={`source-badge ${item.source === 'SQLite' ? 'badge-sqlite' : 'badge-mongodb'}`}>
+                                                        {item.source} Datastore
+                                                    </span>
+                                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>REL-IDX-{idx + 101}</span>
+                                                </div>
+                                                <p className="card-desc" style={{ fontSize: '0.9rem', color: 'var(--primary)', fontWeight: 500, margin: 0 }}>{item.text}</p>
                                             </div>
                                         ))}
                                     </div>
