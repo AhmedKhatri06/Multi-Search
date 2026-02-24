@@ -126,12 +126,12 @@ const MultiSearchPage = () => {
             setCurrentStep(0);
             interval = setInterval(() => {
                 setLoadProgress(prev => {
-                    const next = prev + Math.random() * 15;
+                    const next = prev + Math.random() * 25; // Faster increment
                     if (next >= 100) return 100;
                     return next;
                 });
                 setCurrentStep(prev => prev < 4 ? prev + 1 : 4);
-            }, 1500);
+            }, 400); // Shorter interval (1.5 - 2s total)
         } else {
             clearInterval(interval);
         }
@@ -280,10 +280,15 @@ const MultiSearchPage = () => {
                     matchedGroup.name = item.name;
                 }
             } else {
+                let sourceLabel = item.source || "Unknown";
+                if (sourceLabel.toLowerCase() === 'local') sourceLabel = 'CSV Archive';
+                if (sourceLabel.toLowerCase() === 'sqlite') sourceLabel = 'Identity SQL';
+                if (sourceLabel.toLowerCase() === 'mongodb') sourceLabel = 'Cluster DB';
+
                 groups.push({
                     ...item,
                     descriptions: (item.description && item.description !== 'No description available') ? [item.description] : [],
-                    sources: [item.source || "Unknown"]
+                    sources: [sourceLabel]
                 });
             }
         });
@@ -298,15 +303,26 @@ const MultiSearchPage = () => {
         const searchName = searchData ? searchData.name : query;
         if (!searchName || typeof searchName !== 'string' || !searchName.trim()) return;
 
-        // Sync the search bar with the new name if coming from the precision form
-        if (precisionData) setQuery(searchName);
+        // B-003: Reset stale metadata instantly
+        setData(null);
+        setCandidates([]);
+        setLoadProgress(0);
 
         setStage(STAGES.IDENTIFYING);
-        setCandidates([]);
 
-        const finalQuery = searchMode === SEARCH_MODES.PHONE
-            ? (searchName.startsWith('+') ? searchName : `${selectedCountry.prefix}${searchName}`)
-            : searchName;
+        // F-002: Normalize search query
+        let finalSearchName = searchName;
+        if (searchMode === SEARCH_MODES.PHONE) {
+            const cleanNumber = searchName.replace(/\+/g, "").replace(/\D/g, "");
+            // If it doesn't start with +, prepend the selected prefix
+            if (!searchName.startsWith("+")) {
+                finalSearchName = `${selectedCountry.prefix}${cleanNumber}`;
+            }
+        }
+
+        // id: 12 - Sync global query so progress bar shows the LATEST name/number
+        setQuery(finalSearchName);
+        const finalQuery = finalSearchName;
 
         const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
@@ -319,6 +335,12 @@ const MultiSearchPage = () => {
                     number: precisionData?.number || ""
                 }),
             });
+
+            // B-002: If it's a phone search, try to find the name early for the progress bar
+            if (searchMode === SEARCH_MODES.PHONE) {
+                // We'll set a temporary "Resolving..." but if the API returns directResolve, it will update
+                setData({ personaName: "Resolving identity..." });
+            }
 
             if (!res.ok) throw new Error(`API failed with status ${res.status}`);
 
@@ -417,7 +439,7 @@ const MultiSearchPage = () => {
     };
 
     return (
-        <div className="saas-layout">
+        <div className={`saas-layout ${stage === STAGES.ENTRY ? 'stage-entry' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: stage === STAGES.ENTRY ? 'hidden' : 'auto' }}>
             {/* Top Navigation: Professional SaaS Header */}
             <nav className="navbar">
                 <div className="nav-logo" onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
@@ -580,7 +602,7 @@ const MultiSearchPage = () => {
                                             )}
                                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                                                 {person.sources && person.sources.map((src, i) => (
-                                                    <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 0.8 }}>
+                                                    <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 1, color: 'var(--accent)', fontWeight: 600 }}>
                                                         📍 {src}
                                                     </span>
                                                 ))}
@@ -603,13 +625,15 @@ const MultiSearchPage = () => {
                     </div>
                 )}
 
-                {/* 3. Dashboard View (Two-Column SaaS Layout) */}
-                {stage === STAGES.DASHBOARD && deepData && (
-                    <div className="dashboard-container" style={{ paddingTop: '0' }}>
+            </main>
 
-                        {/* PROFILE HERO: Premium Glassmorphic Header */}
+            {/* 3. Dashboard View — Full-Width (outside .container) */}
+            {stage === STAGES.DASHBOARD && deepData && (
+                <div className="dashboard-container">
+
+                    <div className="results-container">
+                        {/* Profile Summary Card */}
                         <section className="profile-hero animate-fade-up">
-                            <div className="hero-blur-bg"></div>
                             <div className="profile-hero-content">
                                 <div className="profile-avatar-container">
                                     <img
@@ -622,7 +646,6 @@ const MultiSearchPage = () => {
                                 </div>
                                 <div className="profile-info">
                                     <div className="profile-tags">
-                                        <span className="source-pill">VERIFIED IDENTITY</span>
                                         {deepData.person.location && <span className="location-pill">📍 {deepData.person.location}</span>}
                                     </div>
                                     <h1 className="profile-name">{deepData.person.name}</h1>
@@ -660,74 +683,99 @@ const MultiSearchPage = () => {
                             </div>
                         </section>
 
-                        <div className="results-container">
-                            {/* RIGHT: Categorized structured results */}
-                            <section className="results-feed">
+                        {/* Intelligence Feed */}
+                        <section className="results-feed">
 
-                                {/* Category: Media Gallery */}
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">Media Verification</h3>
-                                        <span className="category-count">{deepData.images?.length || 0} Items</span>
-                                    </div>
-                                    <div className="gallery-slider">
-                                        {deepData.images && deepData.images.length > 0 ? (
-                                            deepData.images.map((img, idx) => (
-                                                <img key={idx} src={img} className="gallery-thumbnail" alt="Evidence" onClick={() => openPreview(img, 'Media')} style={{ cursor: 'pointer' }} />
-                                            ))
-                                        ) : (
-                                            <div className="gallery-thumbnail" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: 'var(--text-muted)' }}>
-                                                No Media Data
-                                            </div>
-                                        )}
-                                    </div>
+                            {/* Media Verification */}
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">📷 Media Verification</h3>
+                                    <span className="category-count">{deepData.images?.length || 0} Items</span>
                                 </div>
+                                {deepData.images && deepData.images.length > 0 ? (
+                                    <div className="gallery-slider">
+                                        {deepData.images.map((img, idx) => (
+                                            <img
+                                                key={idx}
+                                                src={img}
+                                                className="gallery-thumbnail"
+                                                alt="Evidence"
+                                                onClick={() => openPreview(img, 'Media')}
+                                                style={{ cursor: 'pointer' }}
+                                                onError={(e) => { e.target.style.display = 'none'; }}
+                                            />
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="empty-state">No media data available</div>
+                                )}
+                            </div>
 
-                                {/* Category: Social Footprint */}
+                            {/* Platform Footprint */}
+                            {deepData.socials.length > 0 && (
                                 <div className="category-section animate-fade-up">
                                     <div className="category-header">
-                                        <h3 className="category-title">Social Media Handles</h3>
+                                        <h3 className="category-title">🌐 Platform Footprint</h3>
                                         <span className="category-count">{deepData.socials.length} Sources</span>
                                     </div>
                                     <div className="social-grid">
                                         {deepData.socials.map((social, i) => (
-                                            <a key={i} href={social.url} target="_blank" rel="noreferrer" className="saas-card animate-scale-in" style={{ padding: '1rem', alignItems: 'center' }}>
-                                                <div className="card-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>🔗</div>
+                                            <a key={i} href={social.url} target="_blank" rel="noreferrer" className="saas-card animate-scale-in">
+                                                <div className="card-icon">🔗</div>
                                                 <div className="card-body">
-                                                    <div className="card-meta" style={{ fontSize: '0.65rem' }}>{social.platform}</div>
-                                                    <div className="card-title" style={{ fontSize: '0.9375rem', marginBottom: 0 }}>{social.handle || "Profile"}</div>
+                                                    <div className="card-meta">{social.platform}</div>
+                                                    <div className="card-title">{social.handle || social.url}</div>
                                                 </div>
                                             </a>
                                         ))}
                                     </div>
                                 </div>
-
-                                {/* Category: Internal Archive */}
-                                {deepData.localData && deepData.localData.length > 0 && (
-                                    <div className="category-section animate-fade-up">
-                                        <div className="category-header">
-                                            <h3 className="category-title">Internal Archive Dossiers</h3>
-                                            <span className="category-count">{deepData.localData.length} Records</span>
-                                        </div>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                            {deepData.localData.map((item, idx) => (
-                                                <div key={idx} className="saas-card animate-scale-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'relative' }}>
-                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                        <span className={`source-badge ${item.source === 'SQLite' ? 'badge-sqlite' : 'badge-mongodb'}`}>
-                                                            {item.source} Datastore
-                                                        </span>
-                                                    </div>
-                                                    <p className="card-desc" style={{ fontSize: '0.9rem', color: 'var(--primary)', fontWeight: 500, margin: 0 }}>{item.text}</p>
-                                                </div>
-                                            ))}
-                                        </div>
+                            )}
+                            {deepData.socials.length === 0 && (
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">🌐 Platform Footprint</h3>
+                                        <span className="category-count">0 Sources</span>
                                     </div>
-                                )}
-                            </section>
-                        </div>
+                                    <div className="empty-state">No social media profiles found.</div>
+                                </div>
+                            )}
+
+                            {/* Internal Archive */}
+                            {deepData.localData && deepData.localData.length > 0 && (
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">🗄️ Internal Archive Dossiers</h3>
+                                        <span className="category-count">{deepData.localData.length} Records</span>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                                        {deepData.localData.map((item, idx) => (
+                                            <div key={idx} className="archive-card animate-scale-in">
+                                                <div className="archive-card-header">
+                                                    <span className={`source-badge ${item.source === 'SQLite' ? 'badge-sqlite' : (item.source === 'MongoDB' ? 'badge-mongodb' : 'badge-internet')}`}>
+                                                        {item.source === 'local' ? 'CSV ARCHIVE' : (item.source === 'SQLite' ? 'SQLITE DATASTORE' : (item.source === 'MongoDB' ? 'CLUSTER DB' : (item.source || 'LOCAL').toUpperCase()))}
+                                                    </span>
+                                                    <span className="archive-card-id">ID: {item.id || `${idx + 1}-H1`}</span>
+                                                </div>
+                                                <p className="archive-card-text">{item.text}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {(!deepData.localData || deepData.localData.length === 0) && (
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">🗄️ Internal Archive Dossiers</h3>
+                                        <span className="category-count">0 Records</span>
+                                    </div>
+                                    <div className="empty-state">No internal archive data available.</div>
+                                </div>
+                            )}
+                        </section>
                     </div>
-                )}
-            </main>
+                </div>
+            )}
 
             {/* Mobile Sticky CTA */}
             {stage !== STAGES.ENTRY && (
@@ -743,8 +791,8 @@ const MultiSearchPage = () => {
 
             {/* Modals & Overlays */}
             {previewUrl && (
-                <div className="modal-overlay" onClick={() => setPreviewUrl(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(4px)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-                    <div className="preview-modal" style={{ background: '#fff', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: '1000px', height: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column' }} onClick={e => e.stopPropagation()}>
+                <div className="modal-overlay" onClick={() => setPreviewUrl(null)}>
+                    <div className="preview-modal" style={{ background: '#fff', borderRadius: 'var(--radius-xl)', width: '100%', maxWidth: '1000px', height: '85vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', position: 'relative' }} onClick={e => e.stopPropagation()}>
                         <div style={{ padding: '1.25rem 2rem', borderBottom: '1px solid var(--border-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontWeight: 800 }}>{previewPlatform} Intelligence</span>
                             <button onClick={() => setPreviewUrl(null)} style={{ background: '#f1f5f9', border: 'none', width: '32px', height: '32px', borderRadius: '50%', cursor: 'pointer', fontWeight: 700 }}>×</button>
@@ -755,46 +803,50 @@ const MultiSearchPage = () => {
             )}
 
             {showFeedbackForm && (
-                <div className="modal-overlay" style={{ position: 'fixed', inset: 0, background: 'rgba(15, 23, 42, 0.8)', backdropFilter: 'blur(8px)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }} onClick={() => setShowFeedbackForm(false)}>
-                    <form className="saas-card" onSubmit={handleFeedbackSubmit} style={{ maxWidth: '480px', width: '100%', flexDirection: 'column', padding: '3rem', position: 'relative', zIndex: 9001 }} onClick={e => e.stopPropagation()}>
-                        <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.5rem' }}>Precision Search</h2>
-                        <p style={{ color: 'var(--text-soft)', marginBottom: '2rem', fontSize: '0.9375rem' }}>Provide additional attributes to improve target identification.</p>
+                <div className="modal-overlay" onClick={() => setShowFeedbackForm(false)}>
+                    <form className="precision-modal" onSubmit={handleFeedbackSubmit} onClick={e => e.stopPropagation()}>
+                        <div className="modal-header">
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.25rem' }}>Precision Search</h2>
+                            <p style={{ color: 'var(--text-soft)', margin: 0, fontSize: '0.9rem' }}>Provide additional attributes to improve target identification.</p>
+                        </div>
 
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-                            <div className="form-group">
-                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NAME</label>
-                                <input
-                                    className="hero-search-input"
-                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
-                                    value={feedbackData.name}
-                                    onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
-                                    autoFocus
-                                    required
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>KEYWORD</label>
-                                <input
-                                    className="hero-search-input"
-                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
-                                    value={feedbackData.keyword}
-                                    onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
-                                    placeholder="e.g. Student at MIT"
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NUMBER (LOCAL ONLY)</label>
-                                <input
-                                    className="hero-search-input"
-                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
-                                    value={feedbackData.number}
-                                    onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value })}
-                                    placeholder="e.g. 91xxxxxxxxxx"
-                                />
+                        <div className="modal-body">
+                            <div className="form-dense-group">
+                                <div className="form-group">
+                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NAME</label>
+                                    <input
+                                        className="hero-search-input"
+                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                        value={feedbackData.name}
+                                        onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
+                                        autoFocus
+                                        required
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>KEYWORD</label>
+                                    <input
+                                        className="hero-search-input"
+                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                        value={feedbackData.keyword}
+                                        onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
+                                        placeholder="e.g. Student at MIT"
+                                    />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NUMBER (LOCAL ONLY)</label>
+                                    <input
+                                        className="hero-search-input"
+                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                        value={feedbackData.number}
+                                        onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value })}
+                                        placeholder="e.g. 91xxxxxxxxxx"
+                                    />
+                                </div>
                             </div>
                         </div>
 
-                        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '3rem' }}>
+                        <div className="modal-footer">
                             <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel Search</button>
                             <button type="submit" className="nav-btn primary" disabled={savingFeedback}>
                                 {savingFeedback ? "Searching..." : "Search Person"}

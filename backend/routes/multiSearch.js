@@ -362,8 +362,8 @@ router.post("/identify", async (req, res) => {
         const localCandidates = [
             ...csvResults.map(r => ({
                 name: r.name + (keywords ? ` ${keywords}` : ""),
-                description: r.description || "Found in local CSV records",
-                location: r.location || "Local Records",
+                description: r.description || "Identified in CSV Archive",
+                location: r.location || "Archives",
                 confidence: "Verified",
                 source: "local",
                 url: "",
@@ -377,8 +377,8 @@ router.post("/identify", async (req, res) => {
                 const baseName = parts[0]?.trim() || "Unknown";
                 return {
                     name: baseName + (keywords ? ` ${keywords}` : ""),
-                    description: parts.slice(1).join(" - ").trim() || "Local profile found",
-                    location: p.location || "Local Database",
+                    description: parts.slice(1).join(" - ").trim() || "Identity SQL Record",
+                    location: p.location || "Identity SQL",
                     confidence: "Verified",
                     source: "local",
                     url: p.url || "",
@@ -391,7 +391,7 @@ router.post("/identify", async (req, res) => {
             ...mongoResults.map(d => ({
                 name: (inputType === "PHONE" ? "Potential Lead" : name) + (keywords ? ` ${keywords}` : ""),
                 description: d.text.substring(0, 150) + "...",
-                location: "Internal Records",
+                location: "Cluster DB Archives",
                 confidence: "Verified",
                 source: "local",
                 url: "",
