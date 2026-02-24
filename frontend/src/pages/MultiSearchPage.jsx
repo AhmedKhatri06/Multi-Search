@@ -3,6 +3,19 @@ import "../index.css";
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+
+
+const getPlatformEmoji = (platform) => {
+    if (!platform) return '🔗';
+    const p = platform.toLowerCase();
+    if (p.includes('linkedin')) return '💼';
+    if (p.includes('github')) return '💻';
+    if (p.includes('twitter') || p.includes('x')) return '🐦';
+    if (p.includes('instagram')) return '📸';
+    if (p.includes('facebook')) return '👥';
+    return '🔗';
+};
+
 const MultiSearchPage = () => {
     // Workflow Stages
     const STAGES = {
@@ -93,8 +106,16 @@ const MultiSearchPage = () => {
 
     const maskPhone = (phone) => {
         if (!phone) return "";
-        if (phone.length <= 4) return "****";
-        return phone.slice(0, 2) + "*******" + phone.slice(-3);
+        const clean = phone.replace(/\D/g, "");
+        if (clean.length <= 4) return "****";
+        return `+${clean.slice(0, 2)} ******${clean.slice(-4)}`;
+    };
+
+    const maskEmail = (email) => {
+        if (!email) return "";
+        const [user, domain] = email.split("@");
+        if (!domain) return "****@****";
+        return user.slice(0, 2) + "******@" + domain;
     };
 
     // Simulated Progress Logic
@@ -146,63 +167,66 @@ const MultiSearchPage = () => {
         setRecent(saved);
     }, []);
 
+    const INTEL_LOGS = [
+        "Initializing global intelligence handshake...",
+        "Querying distributed social nodes...",
+        "Analyzing career metadata footprints...",
+        "Cross-referencing location signal data...",
+        "Decrypting public API clusters...",
+        "Heuristic analysis in progress...",
+        "Mapping digital associations...",
+        "Verifying identity consistency...",
+        "Finalizing intelligence bundle..."
+    ];
+
     const LoadingChecklist = ({ title, progress, currentStep, onCancel }) => {
-        const steps = [
-            "Signals captured successfully",
-            "Deep dive completed",
-            "Insights uncovered",
-            "Following the trail...",
-            "Finalizing the search..."
+        const loadingMessages = [
+            "Capturing digital signals",
+            "Diving into the deep web",
+            "Uncovering hidden insights",
+            "Following the digital trail",
+            "Finalizing intel bundle"
         ];
 
         return (
-            <div className="workflow-loading-screen">
-                {/* Background Animation Nodes */}
-                <div className="bg-nodes-container">
-                    {[...Array(6)].map((_, i) => <div key={i} className="bg-node" style={{ left: `${Math.random() * 100}%`, top: `${Math.random() * 100}%`, animationDelay: `${i * 0.5}s` }}></div>)}
-                </div>
+            <div className="workflow-loading-screen modern-glass-mode">
+                <div className="ambient-glow-bg"></div>
 
-                <button className="cancel-query-btn" onClick={onCancel} title="Cancel Search">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                <button className="cancel-pill" onClick={onCancel} title="Cancel Search">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
                         <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
+                    <span>Cancel</span>
                 </button>
-                <div className="loading-content-wrapper">
-                    <div className="loader-orbit">
-                        <div className="loader-orbit-ring"></div>
-                        <div className="central-persona-wrapper">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                                <circle cx="12" cy="7" r="4" />
-                            </svg>
+
+                <div className="floating-intelligence-pill">
+                    <div className="pill-top-section">
+                        <div className="ai-status-orb">
+                            <div className="orb-inner"></div>
+                            <div className="orb-pulse"></div>
+                        </div>
+                        <div className="ai-header-info">
+                            <span className="ai-label">INTEL CORE ACTIVE</span>
+                            <h2 className="ai-target-title">{data?.personaName || query}</h2>
                         </div>
                     </div>
 
-                    <div className="loading-info-compact">
-                        <div className="deep-search-text">
-                            Intelligence Deep Dive on <span>{query}</span>
-                        </div>
-
-                        <div className="sleek-progress-bar">
-                            <div className="sleek-progress-fill" style={{ width: `${progress}%` }}></div>
-                        </div>
-                    </div>
-
-                    <div className="vertical-checklist">
-                        {steps.map((step, idx) => (
-                            <div key={idx} className={`checklist-step ${idx < currentStep ? 'completed' : idx === currentStep ? 'active' : ''}`}>
-                                <div className="step-status-icon">
-                                    {idx < currentStep ? (
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4">
-                                            <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
-                                        </svg>
-                                    ) : idx === currentStep ? (
-                                        <div className="loader-dot-pulse"></div>
-                                    ) : null}
-                                </div>
-                                <span style={{ opacity: idx === currentStep ? 1 : 0.8 }}>{step}</span>
+                    <div className="pill-progress-section">
+                        <div className="liquid-progress-container">
+                            <div className="liquid-progress-fill" style={{ width: `${progress}%` }}>
+                                <div className="liquid-wave"></div>
                             </div>
-                        ))}
+                        </div>
+
+                        <div className="pill-meta-row">
+                            <div className="pill-status-message">
+                                <span className="status-dot"></span>
+                                <span className="status-text">{loadingMessages[currentStep]}</span>
+                            </div>
+                            <div className="pill-percentage-bubble">
+                                {Math.floor(progress)}%
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -210,8 +234,13 @@ const MultiSearchPage = () => {
     };
 
     const groupCandidates = (data) => {
-        // Sort by name length descending so we favor longer, more descriptive names as bases
-        const sortedData = [...data].sort((a, b) => (b.name || "").length - (a.name || "").length);
+        // Sort: Local results first, then by name length descending
+        const sortedData = [...data].sort((a, b) => {
+            if (a.source === "local" && b.source !== "local") return -1;
+            if (a.source !== "local" && b.source === "local") return 1;
+            return (b.name || "").length - (a.name || "").length;
+        });
+
         const groups = [];
 
         sortedData.forEach(item => {
@@ -220,9 +249,14 @@ const MultiSearchPage = () => {
 
             let matchedGroup = groups.find(group => {
                 const groupName = group.name.toLowerCase().trim();
-                // Merge if one name is a substring of another OR they share a significant prefix
-                // Minimum 4 characters to avoid generic matches like "a" or "the"
-                return (groupName.includes(name) || name.includes(groupName)) && name.length >= 4;
+                const itemSource = item.source || "Unknown";
+                const groupSource = group.source || "Unknown";
+
+                // 1. NEVER merge different sources to avoid "Hybrid Cards"
+                if (itemSource !== groupSource) return false;
+
+                // 2. Only merge if names are identical
+                return groupName === name;
             });
 
             if (matchedGroup) {
@@ -237,8 +271,12 @@ const MultiSearchPage = () => {
                 if (!matchedGroup.sources.includes(itemSource)) {
                     matchedGroup.sources.push(itemSource);
                 }
-                // Keep the longer name
-                if (item.name.length > matchedGroup.name.length) {
+                // Keep the "Verified" local record's name as primary if available
+                if (item.source === "local" && matchedGroup.source !== "local") {
+                    matchedGroup.name = item.name;
+                    matchedGroup.source = "local";
+                } else if (item.name.length > matchedGroup.name.length && matchedGroup.source !== "local") {
+                    // Otherwise keep the longest descriptive name for internet results
                     matchedGroup.name = item.name;
                 }
             } else {
@@ -252,29 +290,47 @@ const MultiSearchPage = () => {
         return groups;
     };
 
-    const handleIdentify = async () => {
-        if (!query.trim()) return;
+    const handleIdentify = async (precisionData = null) => {
+        // Ensure precisionData is actually a data object, not a React Event
+        const isData = precisionData && typeof precisionData === 'object' && !precisionData.nativeEvent;
+        const searchData = isData ? precisionData : null;
+
+        const searchName = searchData ? searchData.name : query;
+        if (!searchName || typeof searchName !== 'string' || !searchName.trim()) return;
+
+        // Sync the search bar with the new name if coming from the precision form
+        if (precisionData) setQuery(searchName);
+
         setStage(STAGES.IDENTIFYING);
         setCandidates([]);
 
         const finalQuery = searchMode === SEARCH_MODES.PHONE
-            ? (query.startsWith('+') ? query : `${selectedCountry.prefix}${query}`)
-            : query;
+            ? (searchName.startsWith('+') ? searchName : `${selectedCountry.prefix}${searchName}`)
+            : searchName;
 
         const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/identify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name: finalQuery }),
+                body: JSON.stringify({
+                    name: finalQuery,
+                    keywords: precisionData?.keyword || "",
+                    number: precisionData?.number || ""
+                }),
             });
 
             if (!res.ok) throw new Error(`API failed with status ${res.status}`);
 
             const result = await res.json();
 
-            if (Array.isArray(result) && result.length > 0) {
-                const grouped = groupCandidates(result);
+            if (result.directResolve && result.resolvedPersona) {
+                console.log("[Search] Direct Resolve Triggered:", result.personaName);
+                // Immediately proceed to Deep Search with the resolved persona
+                setData({ personaName: result.personaName }); // Store for progress bar
+                handleCandidateSelect(result.resolvedPersona);
+            } else if (result.candidates && result.candidates.length > 0) {
+                const grouped = groupCandidates(result.candidates);
                 setCandidates(grouped);
                 setStage(STAGES.SELECTING);
             } else {
@@ -291,6 +347,7 @@ const MultiSearchPage = () => {
 
     const handleCandidateSelect = async (candidate) => {
         setStage(STAGES.DEEP_LOADING);
+        setData(prev => ({ ...prev, personaName: candidate.name })); // Ensure name shows in loader
         const VITE_API_URL = API_URL || "http://localhost:5000";
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/deep`, {
@@ -310,44 +367,18 @@ const MultiSearchPage = () => {
             localStorage.setItem("recent-searches", JSON.stringify(updated));
         } catch (err) {
             console.error("Deep Search failed:", err);
-            setStage(STAGES.SELECTING);
             alert("Failed to retrieve deep search details. Please check your connection.");
         }
     };
 
+
+
     const handleFeedbackSubmit = async (e) => {
         e.preventDefault();
-        if (!feedbackData.name || !feedbackData.keyword) return;
+        if (!feedbackData.name) return;
 
-        const VITE_API_URL = API_URL || "http://localhost:5000";
-        try {
-            setSavingFeedback(true);
-            const res = await fetch(`${VITE_API_URL}/api/multi-search/forminfo`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(feedbackData),
-            });
-
-            if (res.ok) {
-                setShowFeedbackForm(false);
-                // Trigger deep search for the newly provided details as a manual candidate
-                const manualCandidate = {
-                    name: feedbackData.name,
-                    description: feedbackData.keyword,
-                    location: feedbackData.location,
-                    confidence: "Manual",
-                    source: "internet"
-                };
-                handleCandidateSelect(manualCandidate);
-            } else {
-                alert("Failed to save feedback.");
-            }
-        } catch (err) {
-            console.error("Feedback failed:", err);
-            alert("Connection error while saving feedback.");
-        } finally {
-            setSavingFeedback(false);
-        }
+        setShowFeedbackForm(false);
+        handleIdentify(feedbackData);
     };
 
     const handleReset = () => {
@@ -485,7 +516,7 @@ const MultiSearchPage = () => {
                                     onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
                                     autoFocus
                                 />
-                                <button className="hero-search-btn" onClick={handleIdentify}>
+                                <button className="hero-search-btn" onClick={() => handleIdentify()}>
                                     Run Intelligence
                                 </button>
                             </div>
@@ -562,125 +593,138 @@ const MultiSearchPage = () => {
                         </div>
                         <div className="animate-fade-up" style={{ marginTop: '3rem', textAlign: 'center' }}>
                             <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Don't see who you're looking for?</p>
-                            <button className="nav-btn secondary" onClick={() => setShowFeedbackForm(true)} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>Provide more details</button>
+                            <button className="nav-btn secondary" onClick={() => {
+                                setFeedbackData({ name: query, keyword: '', number: '' });
+                                setShowFeedbackForm(true);
+                            }} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+                                Person Not Found
+                            </button>
                         </div>
                     </div>
                 )}
 
                 {/* 3. Dashboard View (Two-Column SaaS Layout) */}
                 {stage === STAGES.DASHBOARD && deepData && (
-                    <div className="results-container" style={{ paddingTop: '0' }}>
-                        {/* LEFT: Sticky AI Insights Sidebar */}
-                        <aside className="sticky-sidebar animate-fade-up">
-                            <div className="ai-insight-panel">
-                                <div className="ai-badge" style={{ marginBottom: '1rem' }}>✨ INTEL SUMMARY</div>
-                                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '0.75rem' }}>{deepData.person.name}</h2>
-                                <p style={{ fontSize: '0.875rem', lineHeight: 1.6, color: 'var(--text-soft)', marginBottom: '1.5rem' }}>
-                                    {deepData.aiSummary?.message || "Aggregated intelligence profile reconstructed from multiple distributed data sources."}
-                                </p>
+                    <div className="dashboard-container" style={{ paddingTop: '0' }}>
 
-                                <div className="attribute-grid" style={{ paddingTop: '1.5rem', borderTop: '1px solid var(--border-light)' }}>
-                                    <div className="attr-item">
-                                        <span className="attr-label">Probable Location</span>
-                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.person.location || "Undisclosed / Multi-regional"}</span>
-                                    </div>
-                                    <div className="attr-item">
-                                        <span className="attr-label">Intelligence Status</span>
-                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.person.confidence} Accuracy</span>
-                                    </div>
-                                    <div className="attr-item">
-                                        <span className="attr-label">Communication Nodes</span>
-                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem', marginTop: '0.25rem' }}>
-                                            {deepData.person.phoneNumbers && deepData.person.phoneNumbers.length > 0
-                                                ? deepData.person.phoneNumbers.map((p, i) => (
-                                                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                        <span className="field-value" style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.8rem' }}>
-                                                            {revealedNumbers.has(p) ? p : maskPhone(p)}
-                                                        </span>
-                                                        <button
-                                                            className="reveal-btn-sm"
-                                                            onClick={() => toggleReveal(p)}
-                                                            style={{ padding: '0 6px', fontSize: '0.6rem', height: '18px' }}
-                                                        >
-                                                            {revealedNumbers.has(p) ? "Hide" : "Show"}
-                                                        </button>
-                                                    </div>
-                                                ))
-                                                : <span className="attr-value" style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>None Detected</span>}
-                                        </div>
-                                    </div>
-                                    <div className="attr-item">
-                                        <span className="attr-label">Digital Presence</span>
-                                        <span className="attr-value" style={{ fontSize: '0.9rem' }}>{deepData.socials.length} Active Platform Nodes</span>
-                                    </div>
+                        {/* PROFILE HERO: Premium Glassmorphic Header */}
+                        <section className="profile-hero animate-fade-up">
+                            <div className="hero-blur-bg"></div>
+                            <div className="profile-hero-content">
+                                <div className="profile-avatar-container">
+                                    <img
+                                        src={deepData.person.primaryImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff"}
+                                        alt={deepData.person.name}
+                                        className="profile-avatar"
+                                        onError={(e) => { e.target.src = "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff"; }}
+                                    />
+                                    <div className="avatar-status-ring"></div>
                                 </div>
-                            </div>
-                        </aside>
+                                <div className="profile-info">
+                                    <div className="profile-tags">
+                                        <span className="source-pill">VERIFIED IDENTITY</span>
+                                        {deepData.person.location && <span className="location-pill">📍 {deepData.person.location}</span>}
+                                    </div>
+                                    <h1 className="profile-name">{deepData.person.name}</h1>
+                                    <p className="profile-subtitle">{deepData.person.description || "Intelligence Synthesis Target"}</p>
 
-                        {/* RIGHT: Categorized structured results */}
-                        <section className="results-feed">
-
-                            {/* Category: Media Gallery */}
-                            <div className="category-section animate-fade-up">
-                                <div className="category-header">
-                                    <h3 className="category-title">Media Verification</h3>
-                                    <span className="category-count">{deepData.images?.length || 0} Items</span>
-                                </div>
-                                <div className="gallery-slider">
-                                    {deepData.images && deepData.images.length > 0 ? (
-                                        deepData.images.map((img, idx) => (
-                                            <img key={idx} src={img} className="gallery-thumbnail" alt="Evidence" onClick={() => openPreview(img, 'Media')} style={{ cursor: 'pointer' }} />
-                                        ))
-                                    ) : (
-                                        <div className="gallery-thumbnail" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: 'var(--text-muted)' }}>
-                                            No Media Data
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Category: Social Footprint */}
-                            <div className="category-section animate-fade-up">
-                                <div className="category-header">
-                                    <h3 className="category-title">Platform Footprint</h3>
-                                    <span className="category-count">{deepData.socials.length} Sources</span>
-                                </div>
-                                <div className="social-grid">
-                                    {deepData.socials.map((social, i) => (
-                                        <a key={i} href={social.url} target="_blank" rel="noreferrer" className="saas-card animate-scale-in" style={{ padding: '1rem', alignItems: 'center' }}>
-                                            <div className="card-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>🔗</div>
-                                            <div className="card-body">
-                                                <div className="card-meta" style={{ fontSize: '0.65rem' }}>{social.platform}</div>
-                                                <div className="card-title" style={{ fontSize: '0.9375rem', marginBottom: 0 }}>{social.handle || "Profile"}</div>
+                                    <div className="profile-quick-links">
+                                        {deepData.person.phoneNumbers?.length > 0 && (
+                                            <div className="social-pill-link" style={{ cursor: 'pointer' }} onClick={() => toggleReveal(deepData.person.phoneNumbers[0])}>
+                                                <span className="platform-icon">📞</span>
+                                                <span className="platform-name">
+                                                    {revealedNumbers.has(deepData.person.phoneNumbers[0])
+                                                        ? deepData.person.phoneNumbers[0]
+                                                        : maskPhone(deepData.person.phoneNumbers[0])}
+                                                </span>
                                             </div>
-                                        </a>
-                                    ))}
-                                </div>
-                            </div>
-
-                            {/* Category: Internal Archive */}
-                            {deepData.localData && deepData.localData.length > 0 && (
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">Internal Archive Dossiers</h3>
-                                        <span className="category-count">{deepData.localData.length} Records</span>
-                                    </div>
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                        {deepData.localData.map((item, idx) => (
-                                            <div key={idx} className="saas-card animate-scale-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'relative' }}>
-                                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                                    <span className={`source-badge ${item.source === 'SQLite' ? 'badge-sqlite' : 'badge-mongodb'}`}>
-                                                        {item.source} Datastore
-                                                    </span>
-                                                    <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>REL-IDX-{idx + 101}</span>
-                                                </div>
-                                                <p className="card-desc" style={{ fontSize: '0.9rem', color: 'var(--primary)', fontWeight: 500, margin: 0 }}>{item.text}</p>
+                                        )}
+                                        {deepData.person.emails?.length > 0 && (
+                                            <div className="social-pill-link" style={{ cursor: 'pointer' }} onClick={() => toggleReveal(deepData.person.emails[0])}>
+                                                <span className="platform-icon">✉️</span>
+                                                <span className="platform-name">
+                                                    {revealedNumbers.has(deepData.person.emails[0])
+                                                        ? deepData.person.emails[0]
+                                                        : maskEmail(deepData.person.emails[0])}
+                                                </span>
                                             </div>
+                                        )}
+                                        {deepData.socials.map((social, i) => (
+                                            <a key={i} href={social.url} target="_blank" rel="noreferrer" className="social-pill-link" title={social.platform}>
+                                                <span className="platform-icon">{getPlatformEmoji(social.platform)}</span>
+                                                <span className="platform-name">{social.platform}</span>
+                                            </a>
                                         ))}
                                     </div>
                                 </div>
-                            )}
+                            </div>
                         </section>
+
+                        <div className="results-container">
+                            {/* RIGHT: Categorized structured results */}
+                            <section className="results-feed">
+
+                                {/* Category: Media Gallery */}
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">Media Verification</h3>
+                                        <span className="category-count">{deepData.images?.length || 0} Items</span>
+                                    </div>
+                                    <div className="gallery-slider">
+                                        {deepData.images && deepData.images.length > 0 ? (
+                                            deepData.images.map((img, idx) => (
+                                                <img key={idx} src={img} className="gallery-thumbnail" alt="Evidence" onClick={() => openPreview(img, 'Media')} style={{ cursor: 'pointer' }} />
+                                            ))
+                                        ) : (
+                                            <div className="gallery-thumbnail" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f8fafc', color: 'var(--text-muted)' }}>
+                                                No Media Data
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Category: Social Footprint */}
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">Social Media Handles</h3>
+                                        <span className="category-count">{deepData.socials.length} Sources</span>
+                                    </div>
+                                    <div className="social-grid">
+                                        {deepData.socials.map((social, i) => (
+                                            <a key={i} href={social.url} target="_blank" rel="noreferrer" className="saas-card animate-scale-in" style={{ padding: '1rem', alignItems: 'center' }}>
+                                                <div className="card-icon" style={{ width: '32px', height: '32px', fontSize: '1rem' }}>🔗</div>
+                                                <div className="card-body">
+                                                    <div className="card-meta" style={{ fontSize: '0.65rem' }}>{social.platform}</div>
+                                                    <div className="card-title" style={{ fontSize: '0.9375rem', marginBottom: 0 }}>{social.handle || "Profile"}</div>
+                                                </div>
+                                            </a>
+                                        ))}
+                                    </div>
+                                </div>
+
+                                {/* Category: Internal Archive */}
+                                {deepData.localData && deepData.localData.length > 0 && (
+                                    <div className="category-section animate-fade-up">
+                                        <div className="category-header">
+                                            <h3 className="category-title">Internal Archive Dossiers</h3>
+                                            <span className="category-count">{deepData.localData.length} Records</span>
+                                        </div>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                            {deepData.localData.map((item, idx) => (
+                                                <div key={idx} className="saas-card animate-scale-in" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', position: 'relative' }}>
+                                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                                        <span className={`source-badge ${item.source === 'SQLite' ? 'badge-sqlite' : 'badge-mongodb'}`}>
+                                                            {item.source} Datastore
+                                                        </span>
+                                                    </div>
+                                                    <p className="card-desc" style={{ fontSize: '0.9rem', color: 'var(--primary)', fontWeight: 500, margin: 0 }}>{item.text}</p>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </section>
+                        </div>
                     </div>
                 )}
             </main>
@@ -718,7 +762,7 @@ const MultiSearchPage = () => {
 
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
                             <div className="form-group">
-                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>FULL NAME</label>
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NAME</label>
                                 <input
                                     className="hero-search-input"
                                     style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
@@ -729,27 +773,37 @@ const MultiSearchPage = () => {
                                 />
                             </div>
                             <div className="form-group">
-                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>ORGANIZATION / PROFESSION</label>
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>KEYWORD</label>
                                 <input
                                     className="hero-search-input"
                                     style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
                                     value={feedbackData.keyword}
                                     onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
-                                    placeholder="e.g. Recruiter at Nexa"
-                                    required
+                                    placeholder="e.g. Student at MIT"
+                                />
+                            </div>
+                            <div className="form-group">
+                                <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NUMBER (LOCAL ONLY)</label>
+                                <input
+                                    className="hero-search-input"
+                                    style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)', position: 'relative', zIndex: 9002 }}
+                                    value={feedbackData.number}
+                                    onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value })}
+                                    placeholder="e.g. 91xxxxxxxxxx"
                                 />
                             </div>
                         </div>
 
                         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '3rem' }}>
-                            <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel</button>
+                            <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel Search</button>
                             <button type="submit" className="nav-btn primary" disabled={savingFeedback}>
-                                {savingFeedback ? "Synthesizing..." : "Initiate Intelligence Search"}
+                                {savingFeedback ? "Searching..." : "Search Person"}
                             </button>
                         </div>
                     </form>
                 </div>
             )}
+
         </div>
     );
 };

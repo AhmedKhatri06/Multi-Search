@@ -26,6 +26,29 @@ export function normalizePhoneNumber(phone) {
 }
 
 /**
+ * Extracts potential phone numbers and emails from a block of text.
+ * @param {string} text 
+ * @returns {{phones: string[], emails: string[]}}
+ */
+export function extractContacts(text) {
+    if (!text) return { phones: [], emails: [] };
+
+    // Regex for basic international and domestic phone formats
+    const phoneRegex = /(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}/g;
+
+    // Regex for standard email format
+    const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+
+    const phones = (text.match(phoneRegex) || []).map(p => p.trim());
+    const emails = (text.match(emailRegex) || []).map(e => e.trim().toLowerCase());
+
+    return {
+        phones: [...new Set(phones)],
+        emails: [...new Set(emails)]
+    };
+}
+
+/**
  * Maps varying source data to a unified profile structure.
  * @param {any} item Raw data item from any source
  * @param {string} source Source identifier (e.g., "CSV:True.csv", "SQLite", "MongoDB")

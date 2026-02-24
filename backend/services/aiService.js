@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || "").trim());
 
 /**
  * Identifies people based on user criteria and search context.
@@ -27,12 +27,13 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       
       STEPS:
       1. Analyze all search results.
-      2. Cluster results that refer to the SAME person (e.g. "Pankaj Rathod on LinkedIn" and "Pankaj Rathod | VJTI" might be the same).
-      3. For each unique person, generate a distinct entry. If multiple profiles clearly belong to different people (different jobs/locations), DO NOT cluster them.
-      4. FORMAT RULE: The 'name' field MUST be in the format "Full Name - Keyword" (e.g. "Pankaj Rathod - SBMP", "Pankaj Shah - CEO").
-      5. Include the primary 'url' (e.g. LinkedIn or personal site) for that specific person.
-      6. Limit the list to top 20 candidates.
-      7. If no candidates are found that match the name, return "No confident candidates found".
+      2. Cluster results that refer to the SAME person.
+      3. For a NAME search, focus on resolving the specific individual.
+      4. For a PHONE/CONTACT search, look for the person most strongly associated with that number (e.g., in directory listings, bios, or contact pages).
+      5. FORMAT RULE: The 'name' field MUST be in the format "Full Name - Keyword" (e.g. "Pankaj Rathod - SBMP", "Pankaj Shah - CEO").
+      6. Include the primary 'url' (e.g. LinkedIn or personal site) for that specific person.
+      7. Limit the list to top 20 candidates.
+      8. If no candidates are found that match the criteria, return "No confident candidates found".
       
       OUTPUT JSON ARRAY:
       [
@@ -84,6 +85,7 @@ ${JSON.stringify(searchResults, null, 2)}
         throw error;
     }
 };
+
 
 /**
  * Generate text using Gemini AI
