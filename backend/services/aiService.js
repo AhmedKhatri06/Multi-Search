@@ -1,9 +1,9 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || "").trim());
+const groq = new Groq({ apiKey: (process.env.GROQ_API_KEY || "").trim() });
 
 /**
  * Identifies people based on user criteria and search context.
@@ -15,12 +15,10 @@ const genAI = new GoogleGenerativeAI((process.env.GEMINI_API_KEY || "").trim());
  * @returns {Promise<Array|string>} Structured list of people or "No confident candidates found"
  */
 export const identifyPeople = async ({ name, location, keywords, searchResults }) => {
-    if (!process.env.GEMINI_API_KEY) {
-        console.error("GEMINI_API_KEY is missing in environment variables.");
+    if (!process.env.GROQ_API_KEY) {
+        console.error("GROQ_API_KEY is missing in environment variables.");
         throw new Error("AI Service configuration error");
     }
-
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
     const systemPrompt = `
       You are an expert entity resolution system. Your task is to identify unique individuals from a list of search results.
@@ -60,9 +58,16 @@ ${JSON.stringify(searchResults, null, 2)}
 `;
 
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        let text = response.text().trim();
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt }
+            ],
+            model: "llama3-8b-8192",
+            temperature: 0.3,
+        });
+
+        let text = chatCompletion.choices[0]?.message?.content?.trim() || "";
 
         // Safety check for common AI formatting
         if (text.startsWith("```")) {
@@ -88,22 +93,30 @@ ${JSON.stringify(searchResults, null, 2)}
 
 
 /**
- * Generate text using Gemini AI
+ * Generate text using Groq AI
  * @param {string} prompt
  * @returns {Promise<string>}
  */
 export const generateText = async (prompt) => {
-    if (!process.env.GEMINI_API_KEY) {
-        console.error("GEMINI_API_KEY is missing in environment variables.");
+    if (!process.env.GROQ_API_KEY) {
+        console.error("GROQ_API_KEY is missing in environment variables.");
         throw new Error("AI Service configuration error");
     }
 
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
-
     try {
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        return response.text();
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [
+                {
+                    role: "system",
+                    content: "You are a professional research analyst. Generate concise, insight-driven summaries based on the provided data. Focus on key facts, notable achievements, and actionable insights. Avoid generic filler text. Write in a clear, professional tone suitable for UI display."
+                },
+                { role: "user", content: prompt }
+            ],
+            model: "llama3-8b-8192",
+            temperature: 0.5,
+        });
+
+        return chatCompletion.choices[0]?.message?.content || "";
     } catch (error) {
         console.error("AI generateText Error:", error);
         throw error;

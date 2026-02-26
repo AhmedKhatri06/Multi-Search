@@ -371,15 +371,15 @@ body {
 
 .hero-search-container:focus-within {
   transform: translateY(-4px) scale(1.01);
-  border-color: var(--accent);
-  box-shadow: 0 50px 120px -24px rgba(37, 99, 235, 0.2),
-    0 0 0 4px rgba(37, 99, 235, 0.08);
+  border-color: transparent;
+  box-shadow: 0 40px 100px -20px rgba(15, 23, 42, 0.12);
   background: rgba(255, 255, 255, 0.9);
 }
 
 .hero-search-input:focus {
   outline: none !important;
-  box-shadow: 0 0 0 3px var(--accent-glow) !important;
+  box-shadow: none !important;
+  border: none !important;
 }
 
 .nav-search-input:focus {
@@ -732,6 +732,7 @@ body {
   grid-template-columns: 1fr;
   gap: 1rem;
   width: 100%;
+  align-items: stretch;
 }
 
 @media (min-width: 768px) {
@@ -741,12 +742,6 @@ body {
 }
 
 @media (min-width: 1024px) {
-  .candidates-grid {
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  }
-}
-
-@media (min-width: 1280px) {
   .candidates-grid {
     grid-template-columns: repeat(3, 1fr);
   }
@@ -780,9 +775,54 @@ body {
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   display: flex;
   gap: 0.75rem;
-  align-items: center;
+  align-items: flex-start;
   text-decoration: none;
   color: inherit;
+}
+
+.candidates-grid .saas-card {
+  flex-direction: row;
+  align-items: flex-start;
+  height: 200px;
+  box-sizing: border-box;
+  overflow: hidden;
+  position: relative;
+}
+
+.candidates-grid .saas-card.expanded {
+  height: auto;
+}
+
+.candidates-grid .saas-card:not(.expanded) .card-body {
+  overflow: hidden;
+  position: relative;
+}
+
+.candidates-grid .saas-card:not(.expanded)::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 40px;
+  background: linear-gradient(transparent, var(--bg-subtle));
+  pointer-events: none;
+}
+
+.card-read-more-text {
+  display: inline;
+  color: var(--text-soft);
+  font-size: 0.8rem;
+  font-weight: 500;
+  text-decoration: underline;
+  cursor: pointer;
+  position: relative;
+  z-index: 2;
+  margin-top: 0.25rem;
+}
+
+.card-read-more-text:hover {
+  color: var(--accent);
 }
 
 .saas-card:hover {

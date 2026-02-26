@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import "../index.css";
 
 const API_URL = import.meta.env.VITE_API_URL;
@@ -94,6 +94,27 @@ const MultiSearchPage = () => {
     const [loadProgress, setLoadProgress] = useState(0);
     const [currentStep, setCurrentStep] = useState(0);
     const [revealedNumbers, setRevealedNumbers] = useState(new Set());
+    const [expandedCards, setExpandedCards] = useState(new Set());
+    const [overflowingCards, setOverflowingCards] = useState(new Set());
+    const cardRefs = useRef({});
+
+    const checkCardOverflows = useCallback(() => {
+        const newOverflowing = new Set();
+        Object.entries(cardRefs.current).forEach(([idx, el]) => {
+            if (el && el.scrollHeight > 200) {
+                newOverflowing.add(Number(idx));
+            }
+        });
+        setOverflowingCards(newOverflowing);
+    }, []);
+
+    useEffect(() => {
+        if (candidates.length > 0) {
+            // Small delay to let DOM render
+            const timer = setTimeout(checkCardOverflows, 100);
+            return () => clearTimeout(timer);
+        }
+    }, [candidates, checkCardOverflows]);
 
     const toggleReveal = (phone) => {
         setRevealedNumbers(prev => {
@@ -126,12 +147,12 @@ const MultiSearchPage = () => {
             setCurrentStep(0);
             interval = setInterval(() => {
                 setLoadProgress(prev => {
-                    const next = prev + Math.random() * 25; // Faster increment
+                    const next = prev + Math.random() * 8 + 2; // Slower, smoother increment
                     if (next >= 100) return 100;
                     return next;
                 });
                 setCurrentStep(prev => prev < 4 ? prev + 1 : 4);
-            }, 400); // Shorter interval (1.5 - 2s total)
+            }, 500); // ~2.5-3s total duration
         } else {
             clearInterval(interval);
         }
@@ -570,7 +591,7 @@ const MultiSearchPage = () => {
                         </div>
                         <div className="candidates-grid">
                             {candidates.map((person, idx) => (
-                                <div key={idx} className="saas-card animate-scale-in" onClick={() => handleCandidateSelect(person)} style={{ cursor: 'pointer', alignItems: 'flex-start' }}>
+                                <div key={idx} ref={el => { cardRefs.current[idx] = el; }} className={`saas-card animate-scale-in ${expandedCards.has(idx) ? 'expanded' : ''}`} onClick={() => handleCandidateSelect(person)} style={{ cursor: 'pointer' }}>
                                     <div className="card-icon" style={{ marginTop: '0.25rem' }}>👤</div>
                                     <div className="card-body">
                                         <div className="card-meta">{person.confidence} Accuracy</div>
@@ -609,6 +630,23 @@ const MultiSearchPage = () => {
                                                 {!person.sources && person.location && <p className="card-desc" style={{ fontSize: '0.8rem', opacity: 0.8 }}>📍 {person.location}</p>}
                                             </div>
                                         </div>
+
+                                        {overflowingCards.has(idx) && (
+                                            <span
+                                                className="card-read-more-text"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setExpandedCards(prev => {
+                                                        const next = new Set(prev);
+                                                        if (next.has(idx)) next.delete(idx);
+                                                        else next.add(idx);
+                                                        return next;
+                                                    });
+                                                }}
+                                            >
+                                                {expandedCards.has(idx) ? 'Show less' : 'Read more'}
+                                            </span>
+                                        )}
                                     </div>
                                 </div>
                             ))}

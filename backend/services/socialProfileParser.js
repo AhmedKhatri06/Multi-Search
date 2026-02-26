@@ -11,9 +11,9 @@
  * @returns {Object|null} Structured LinkedIn profile or null
  */
 function parseLinkedInProfile(result) {
-    const url = result.link || "";
+    const url = result.url || result.link || "";
     const title = result.title || "";
-    const snippet = result.snippet || "";
+    const snippet = result.snippet || result.text || "";
 
     // Extract username from URL
     // Examples: linkedin.com/in/mihir-doshi, linkedin.com/pub/john-doe
@@ -66,9 +66,9 @@ function parseLinkedInProfile(result) {
  * @returns {Object|null} Structured Instagram profile or null
  */
 function parseInstagramProfile(result) {
-    const url = result.link || "";
+    const url = result.url || result.link || "";
     const title = result.title || "";
-    const snippet = result.snippet || "";
+    const snippet = result.snippet || result.text || "";
 
     // Extract handle from URL or title
     // Examples: instagram.com/mihirdoshi, @mihirdoshi
@@ -112,9 +112,9 @@ function parseInstagramProfile(result) {
  * @returns {Object|null} Structured Facebook profile or null
  */
 function parseFacebookProfile(result) {
-    const url = result.link || "";
+    const url = result.url || result.link || "";
     const title = result.title || "";
-    const snippet = result.snippet || "";
+    const snippet = result.snippet || result.text || "";
 
     // Extract page name from URL or title
     const urlMatch = url.match(/facebook\.com\/([^/?]+)/);
@@ -143,9 +143,9 @@ function parseFacebookProfile(result) {
  * @returns {Object|null} Structured Twitter profile or null
  */
 function parseTwitterProfile(result) {
-    const url = result.link || "";
+    const url = result.url || result.link || "";
     const title = result.title || "";
-    const snippet = result.snippet || "";
+    const snippet = result.snippet || result.text || "";
 
     // Extract handle from URL
     const urlMatch = url.match(/(?:twitter|x)\.com\/([^/?]+)/);
@@ -172,9 +172,9 @@ function parseTwitterProfile(result) {
  * @returns {Object|null} Structured profile data or null if not a social profile
  */
 export function parseSocialProfile(result) {
-    if (!result || !result.link) return null;
+    if (!result || (!result.url && !result.link)) return null;
 
-    const url = result.link.toLowerCase();
+    const url = (result.url || result.link || '').toLowerCase();
 
     if (url.includes("linkedin.com")) {
         return parseLinkedInProfile(result);

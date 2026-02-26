@@ -661,6 +661,8 @@ router.post("/deep", async (req, res) => {
         // 3. Robust Social Discovery using specialized service
         const queryWords = name.split(' ');
         const socialProfiles = extractSocialAccounts(allSearchItems, name, queryWords, cleanLocation);
+        console.log(`[Deep Search] Social profiles found: ${socialProfiles.length}`);
+        socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url}) [score: ${s.identityScore}]`));
 
         // 4. Extract Contacts
         const webPhones = new Set();

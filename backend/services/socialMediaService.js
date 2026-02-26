@@ -31,8 +31,8 @@ const disqualifyingPatterns = [
 function calculateIdentityScore(result, personName, keywords = [], location = '') {
     let score = 0;
     const title = (result.title || '').toLowerCase();
-    const snippet = (result.snippet || '').toLowerCase();
-    const link = (result.link || '').toLowerCase();
+    const snippet = (result.snippet || result.text || '').toLowerCase();
+    const link = (result.url || '').toLowerCase();
     const combinedText = `${title} ${snippet}`.toLowerCase();
 
     // Name matching (0-40 points) - improved to check snippet too
@@ -72,8 +72,8 @@ function calculateIdentityScore(result, personName, keywords = [], location = ''
 
 function containsDisqualifyingPattern(result) {
     const title = (result.title || '').toLowerCase();
-    const snippet = (result.snippet || '').toLowerCase();
-    const link = (result.link || '').toLowerCase();
+    const snippet = (result.snippet || result.text || '').toLowerCase();
+    const link = (result.url || result.link || '').toLowerCase();
     const combinedText = `${title} ${snippet} ${link}`;
 
     return disqualifyingPatterns.some(pattern => combinedText.includes(pattern));
@@ -90,7 +90,7 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
     const seenUrls = new Set();
 
     internetResults.forEach(result => {
-        const link = result.link || '';
+        const link = result.url || result.link || '';
         const title = result.title || '';
 
         // Detect platform
