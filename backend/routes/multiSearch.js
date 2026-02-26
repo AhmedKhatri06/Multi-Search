@@ -132,6 +132,7 @@ export async function performSearch(query, simpleMode = false) {
             socialQuery = internetQuery;
         }
 
+        console.time(`[Serper] Request: ${socialQuery.slice(0, 30)}...`);
         const response = await axios.post("https://google.serper.dev/search", {
             q: socialQuery,
             num: simpleMode ? 20 : 40
@@ -139,8 +140,10 @@ export async function performSearch(query, simpleMode = false) {
             headers: {
                 "X-API-KEY": process.env.SERPER_API_KEY,
                 "Content-Type": "application/json"
-            }
+            },
+            timeout: 15000 // 15s timeout
         });
+        console.timeEnd(`[Serper] Request: ${socialQuery.slice(0, 30)}...`);
 
         const results = response.data?.organic || [];
 
@@ -424,6 +427,7 @@ router.post("/identify", async (req, res) => {
             searchResults = await performSearch(simpleQuery, true);
         }
 
+        console.time("[AI] Identification Phase");
         if (searchResults && searchResults.length > 0) {
             try {
                 internetCandidates = (await identifyPeople({
@@ -472,6 +476,7 @@ router.post("/identify", async (req, res) => {
                 });
             }
         }
+        console.timeEnd("[AI] Identification Phase");
 
         // 3. Combine and Deduplicate
         const combined = [...localCandidates, ...internetCandidates];
@@ -629,18 +634,24 @@ router.post("/deep", async (req, res) => {
         const cleanLocation = (location && location.toLowerCase() !== "none" && !location.toLowerCase().includes("records") && !location.toLowerCase().includes("datastore")) ? location : "";
         const cleanProfession = (profession && profession.toLowerCase() !== "none") ? profession.substring(0, 50) : "";
 
-        // Query 1: Targeted Social Sweep (Search name + keyword)
-        const hasK = keyword && name.toLowerCase().includes(keyword.toLowerCase());
-        const cleanSearchTerm = hasK ? name : `${name} ${keyword}`.trim();
+        // ID Anchoring: Use known emails/phones to force specific results
+        const targetEmails = person.emails || (person.email ? [person.email] : []);
+        const targetPhones = person.phoneNumbers || (person.phone ? [person.phone] : []);
 
-        const socialQuery = `"${name}" ${hasK ? "" : keyword} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
+        // Build anchor string for search queries
+        let anchorQuery = "";
+        if (targetEmails.length > 0) anchorQuery += ` "${targetEmails[0]}"`;
+        if (targetPhones.length > 0) anchorQuery += ` "${targetPhones[0]}"`;
+
+        // Query 1: Targeted Social Sweep (Search name + keyword + identifiers)
+        const hasK = keyword && name.toLowerCase().includes(keyword.toLowerCase());
+        const socialQuery = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
 
         // Query 2: Broad Context Sweep (Contacts/Emails focus)
-        // Use truncated profession (cleanProfession) to avoid 400 errors from giant paragraph queries
         const contextKeywords = keyword || cleanProfession || "profile OR bio OR contact";
-        const contextQuery = `"${name}" ${cleanLocation} ${contextKeywords}`.trim();
+        const contextQuery = `"${name}" ${cleanLocation} ${contextKeywords}${anchorQuery}`.trim();
 
-        // Query 3: Image Sweep (Search name + photo) - Added cleanProfession for disambiguation
+        // Query 3: Image Sweep
         const imageQuery = `"${name}" ${cleanProfession} "profile picture" OR "portrait"`.trim();
         const fallbackImageQuery = `"${name}" ${cleanProfession} headshot`.trim();
 
@@ -658,9 +669,9 @@ router.post("/deep", async (req, res) => {
 
         const allSearchItems = [...socialResults, ...contextResults];
 
-        // 3. Robust Social Discovery using specialized service
+        // 3. Robust Social Discovery using specialized service with anchors
         const queryWords = name.split(' ');
-        const socialProfiles = extractSocialAccounts(allSearchItems, name, queryWords, cleanLocation);
+        const socialProfiles = extractSocialAccounts(allSearchItems, name, queryWords, cleanLocation, targetEmails, targetPhones);
         console.log(`[Deep Search] Social profiles found: ${socialProfiles.length}`);
         socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url}) [score: ${s.identityScore}]`));
 

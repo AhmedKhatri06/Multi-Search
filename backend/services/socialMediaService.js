@@ -9,15 +9,15 @@ const platformPriority = {
 };
 
 const profilePatterns = {
-    // Exact profile matches only - no /p/, /reel/, /stories/, /tags/
-    instagram: /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._-]+\/?$/,
-    // LinkedIn profiles - usually /in/
-    linkedin: /^https?:\/\/(www\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+\/?$/,
+    // Exact profile matches or with query params
+    instagram: /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/,
+    // LinkedIn profiles - support regional subdomains (in.linkedin.com, uk.linkedin.com)
+    linkedin: /^https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+\/?(\?.*)?$/,
     github: /^https?:\/\/(www\.)?github\.com\/[a-zA-Z0-9_-]+\/?$/,
     // Twitter/X profiles
-    twitter: /^https?:\/\/(www\.)?(twitter|x)\.com\/[a-zA-Z0-9_]+\/?$/,
-    // Facebook profiles/pages (excluding posts, photos, groups, marketplace)
-    facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?$/
+    twitter: /^https?:\/\/(www\.)?(twitter|x)\.com\/[a-zA-Z0-9_]+\/?(\?.*)?$/,
+    // Facebook profiles/pages (support query params)
+    facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/
 };
 
 const disqualifyingPatterns = [
@@ -25,24 +25,39 @@ const disqualifyingPatterns = [
     'reposted', 'retweeted', 'photo by', 'video by', 'post by',
     'see photos', 'view profile of people named', 'search results',
     '/p/', '/posts/', '/status/', '/photos/', '/videos/', '/reel/', '/stories/',
-    '/groups/', '/marketplace/', '/watch/', '/search/', '?ref=', '/events/'
+    '/groups/', '/marketplace/', '/watch/', '/search/', '/events/'
 ];
 
-function calculateIdentityScore(result, personName, keywords = [], location = '') {
+function calculateIdentityScore(result, personName, keywords = [], location = '', targetEmails = [], targetPhones = []) {
     let score = 0;
     const title = (result.title || '').toLowerCase();
     const snippet = (result.snippet || result.text || '').toLowerCase();
-    const link = (result.url || '').toLowerCase();
+    const link = (result.url || result.link || '').toLowerCase();
     const combinedText = `${title} ${snippet}`.toLowerCase();
 
-    // Name matching (0-40 points) - improved to check snippet too
-    const nameParts = personName.toLowerCase().split(' ');
+    // ID ANCHORING: If we find a known email or phone, it's a guaranteed match (+100)
+    const hasEmailMatch = targetEmails.some(email =>
+        combinedText.includes(email.toLowerCase()) || link.includes(email.toLowerCase())
+    );
+    const hasPhoneMatch = targetPhones.some(phone => {
+        const clean = phone.replace(/\D/g, '');
+        return clean.length > 5 && (combinedText.includes(clean) || link.includes(clean));
+    });
+
+    if (hasEmailMatch || hasPhoneMatch) {
+        console.log(`    [Identity Anchor] MATCH FOUND: ${hasEmailMatch ? 'Email' : 'Phone'} -> ${link}`);
+        return 100;
+    }
+
+    // Name matching (0-45 points)
+    const nameParts = personName.toLowerCase().split(' ').filter(p => p.length > 2);
+    if (nameParts.length === 0) return 0;
+
     let nameMatches = 0;
     nameParts.forEach(part => {
-        if (part.length < 2) return; // Skip very short parts
-        if (title.includes(part) || snippet.includes(part)) nameMatches++;
+        if (title.includes(part) || snippet.includes(part) || link.includes(part)) nameMatches++;
     });
-    score += (nameMatches / nameParts.length) * 40;
+    score += (nameMatches / nameParts.length) * 45;
 
     // Keywords matching (0-30 points)
     if (keywords.length > 0) {
@@ -52,19 +67,19 @@ function calculateIdentityScore(result, personName, keywords = [], location = ''
                 keywordMatches++;
             }
         });
-        score += Math.min(keywordMatches * 10, 30);
+        score += Math.min(keywordMatches * 15, 30);
     }
 
     // Location matching (0-15 points)
-    if (location && combinedText.includes(location.toLowerCase())) {
+    if (location && (combinedText.includes(location.toLowerCase()) || link.includes(location.toLowerCase()))) {
         score += 15;
     }
 
-    // Professional indicators (0-15 points)
-    const professionalTerms = ['engineer', 'developer', 'ceo', 'founder', 'manager', 'director', 'analyst', 'designer'];
+    // Professional indicators (0-10 points)
+    const professionalTerms = ['engineer', 'developer', 'ceo', 'founder', 'manager', 'director', 'analyst', 'designer', 'profile'];
     const hasProfessionalTerm = professionalTerms.some(term => combinedText.includes(term));
     if (hasProfessionalTerm) {
-        score += 15;
+        score += 10;
     }
 
     return Math.round(score);
@@ -76,7 +91,7 @@ function containsDisqualifyingPattern(result) {
     const link = (result.url || result.link || '').toLowerCase();
     const combinedText = `${title} ${snippet} ${link}`;
 
-    return disqualifyingPatterns.some(pattern => combinedText.includes(pattern));
+    return disqualifyingPatterns.find(pattern => combinedText.includes(pattern));
 }
 
 function isValidProfileUrl(url, platform) {
@@ -85,13 +100,16 @@ function isValidProfileUrl(url, platform) {
     return pattern.test(url);
 }
 
-export function extractSocialAccounts(internetResults, personName, keywords = [], location = '') {
+export function extractSocialAccounts(internetResults, personName, keywords = [], location = '', targetEmails = [], targetPhones = []) {
     const socialAccounts = [];
     const seenUrls = new Set();
 
+    console.log(`[Social Discovery] Analyzing ${internetResults.length} results for: ${personName}`);
+    if (targetEmails.length > 0) console.log(`  Anchors: ${targetEmails.join(', ')}`);
+
     internetResults.forEach(result => {
         const link = result.url || result.link || '';
-        const title = result.title || '';
+        if (!link) return;
 
         // Detect platform
         let platform = null;
@@ -104,29 +122,44 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         if (!platform) return;
 
         // Validate profile URL
-        if (!isValidProfileUrl(link, platform)) return;
+        if (!isValidProfileUrl(link, platform)) {
+            console.log(`  [Skip] ${platform}: URL pattern mismatch -> ${link}`);
+            return;
+        }
 
         // Check for disqualifying patterns
-        if (containsDisqualifyingPattern(result)) return;
+        const disqualifier = containsDisqualifyingPattern(result);
+        if (disqualifier) {
+            console.log(`  [Skip] ${platform}: Found disqualifier "${disqualifier}" -> ${link}`);
+            return;
+        }
 
-        // Calculate identity score
-        const identityScore = calculateIdentityScore(result, personName, keywords, location);
+        // Calculate identity score with anchoring support
+        const identityScore = calculateIdentityScore(result, personName, keywords, location, targetEmails, targetPhones);
 
-        // Reject low confidence matches (lowered from 50 to 30 for better detection)
-        if (identityScore < 30) return;
+        // Reject low confidence matches
+        if (identityScore < 30) {
+            console.log(`  [Skip] ${platform}: Score too low (${identityScore}) -> ${link}`);
+            return;
+        }
 
         // Avoid duplicates
-        if (seenUrls.has(link)) return;
-        seenUrls.add(link);
+        if (seenUrls.has(link.split('?')[0].replace(/\/$/, ''))) return;
+        seenUrls.add(link.split('?')[0].replace(/\/$/, ''));
 
         // Extract username
-        const username = link.split('/').filter(Boolean).pop();
+        let username = link.split('?')[0].split('/').filter(Boolean).pop();
+        if (platform === 'linkedin' && (username === 'in' || username === 'pub')) {
+            username = link.split('?')[0].split('/').filter(Boolean).slice(-2, -1)[0] || username;
+        }
+
+        console.log(`  [Found] ${platform}: ${username} [Score: ${identityScore}]`);
 
         socialAccounts.push({
             platform: platform.charAt(0).toUpperCase() + platform.slice(1),
             username,
             url: link,
-            confidence: identityScore >= 60 ? 'high' : identityScore >= 40 ? 'medium' : 'low',
+            confidence: identityScore >= 65 ? 'high' : identityScore >= 45 ? 'medium' : 'low',
             identityScore,
             priority: platformPriority[platform] || 99
         });
@@ -140,6 +173,7 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         return a.priority - b.priority;
     });
 
+    console.log(`[Social Discovery] Final count: ${socialAccounts.length}`);
     return socialAccounts;
 }
 

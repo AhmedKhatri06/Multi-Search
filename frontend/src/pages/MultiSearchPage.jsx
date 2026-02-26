@@ -16,6 +16,57 @@ const getPlatformEmoji = (platform) => {
     return '🔗';
 };
 
+const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, personaName }) => {
+    const loadingMessages = [
+        "Capturing digital signals",
+        "Diving into the deep web",
+        "Uncovering hidden insights",
+        "Following the digital trail",
+        "Finalizing intel bundle"
+    ];
+
+    return (
+        <div className="workflow-loading-screen modern-glass-mode">
+            <div className="ambient-glow-bg"></div>
+
+            <button className="cancel-pill" onClick={onCancel} title="Cancel Search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>Cancel</span>
+            </button>
+
+            <div className="floating-intelligence-pill">
+                <div className="pill-top-section">
+                    <div className="ai-status-orb">
+                        <div className="orb-inner"></div>
+                    </div>
+                    <div className="ai-header-info">
+                        <span className="ai-label">INTEL CORE ACTIVE</span>
+                        <h2 className="ai-target-title">{personaName || query}</h2>
+                    </div>
+                </div>
+
+                <div className="pill-progress-section">
+                    <div className="liquid-progress-container">
+                        <div className="liquid-progress-fill" style={{ width: `${progress}%` }}></div>
+                    </div>
+
+                    <div className="pill-meta-row">
+                        <div className="pill-status-message">
+                            <span className="status-dot"></span>
+                            <span className="status-text">{loadingMessages[currentStep]}</span>
+                        </div>
+                        <div className="pill-percentage-bubble">
+                            {Math.floor(progress)}%
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 const MultiSearchPage = () => {
     // Workflow Stages
     const STAGES = {
@@ -139,24 +190,73 @@ const MultiSearchPage = () => {
         return user.slice(0, 2) + "******@" + domain;
     };
 
-    // Simulated Progress Logic
+    // Unified Progress & Step Logic
     useEffect(() => {
         let interval;
         if (stage === STAGES.IDENTIFYING || stage === STAGES.DEEP_LOADING) {
-            setLoadProgress(0);
-            setCurrentStep(0);
             interval = setInterval(() => {
                 setLoadProgress(prev => {
-                    const next = prev + Math.random() * 8 + 2; // Slower, smoother increment
-                    if (next >= 100) return 100;
-                    return next;
+                    // Asymptotic Trickle Logic:
+                    // Never hits a hard ceiling. As it approaches the target (48 or 98), 
+                    // the increment gets smaller and smaller, showing the app is still active.
+                    const target = stage === STAGES.IDENTIFYING ? 48.5 : 99.2;
+                    if (prev < target) {
+                        const remaining = target - prev;
+                        // Move 5% of the remaining distance or at least a tiny random amount
+                        const step = Math.max(remaining * 0.05, Math.random() * 0.1);
+                        return prev + step;
+                    }
+                    // If somehow at or past target, move by tiny micro-increments
+                    return prev + 0.01;
                 });
-                setCurrentStep(prev => prev < 4 ? prev + 1 : 4);
-            }, 500); // ~2.5-3s total duration
+            }, 200);
         } else {
             clearInterval(interval);
         }
         return () => clearInterval(interval);
+    }, [stage]);
+
+    // Update currentStep based on progress
+    useEffect(() => {
+        if (loadProgress < 20) setCurrentStep(0);
+        else if (loadProgress < 40) setCurrentStep(1);
+        else if (loadProgress < 60) setCurrentStep(2);
+        else if (loadProgress < 80) setCurrentStep(3);
+        else setCurrentStep(4);
+    }, [loadProgress]);
+
+    // History Synchronization & Mount Setup
+    useEffect(() => {
+        // Initialize base history state on mount
+        if (!window.history.state || !window.history.state.stage) {
+            window.history.replaceState({ stage: STAGES.ENTRY }, "", window.location.pathname);
+        }
+
+        const handlePopState = (event) => {
+            if (event.state && event.state.stage) {
+                setStage(event.state.stage);
+            } else {
+                setStage(STAGES.ENTRY);
+            }
+        };
+
+        window.addEventListener('popstate', handlePopState);
+        return () => window.removeEventListener('popstate', handlePopState);
+    }, []);
+
+    // Push history for stable stages only (skipping IDENTIFYING / DEEP_LOADING)
+    useEffect(() => {
+        const currentPath = window.location.pathname;
+        const currentHistoryStage = window.history.state?.stage;
+
+        if (currentHistoryStage !== stage) {
+            if (stage === STAGES.SELECTING || stage === STAGES.DASHBOARD) {
+                window.history.pushState({ stage }, "", currentPath);
+            } else if (stage === STAGES.ENTRY && currentHistoryStage !== STAGES.ENTRY) {
+                // Ensure the 'Home' state is reconciled if we manually set back to entry
+                window.history.replaceState({ stage: STAGES.ENTRY }, "", currentPath);
+            }
+        }
     }, [stage]);
 
     useEffect(() => {
@@ -200,59 +300,7 @@ const MultiSearchPage = () => {
         "Finalizing intelligence bundle..."
     ];
 
-    const LoadingChecklist = ({ title, progress, currentStep, onCancel }) => {
-        const loadingMessages = [
-            "Capturing digital signals",
-            "Diving into the deep web",
-            "Uncovering hidden insights",
-            "Following the digital trail",
-            "Finalizing intel bundle"
-        ];
 
-        return (
-            <div className="workflow-loading-screen modern-glass-mode">
-                <div className="ambient-glow-bg"></div>
-
-                <button className="cancel-pill" onClick={onCancel} title="Cancel Search">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
-                        <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                    <span>Cancel</span>
-                </button>
-
-                <div className="floating-intelligence-pill">
-                    <div className="pill-top-section">
-                        <div className="ai-status-orb">
-                            <div className="orb-inner"></div>
-                            <div className="orb-pulse"></div>
-                        </div>
-                        <div className="ai-header-info">
-                            <span className="ai-label">INTEL CORE ACTIVE</span>
-                            <h2 className="ai-target-title">{data?.personaName || query}</h2>
-                        </div>
-                    </div>
-
-                    <div className="pill-progress-section">
-                        <div className="liquid-progress-container">
-                            <div className="liquid-progress-fill" style={{ width: `${progress}%` }}>
-                                <div className="liquid-wave"></div>
-                            </div>
-                        </div>
-
-                        <div className="pill-meta-row">
-                            <div className="pill-status-message">
-                                <span className="status-dot"></span>
-                                <span className="status-text">{loadingMessages[currentStep]}</span>
-                            </div>
-                            <div className="pill-percentage-bubble">
-                                {Math.floor(progress)}%
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    };
 
     const groupCandidates = (data) => {
         // Sort: Local results first, then by name length descending
@@ -273,14 +321,37 @@ const MultiSearchPage = () => {
                 const itemSource = item.source || "Unknown";
                 const groupSource = group.source || "Unknown";
 
-                // 1. NEVER merge different sources to avoid "Hybrid Cards"
-                if (itemSource !== groupSource) return false;
+                // 1. Same source + Same name = Likely same record
+                if (itemSource === groupSource && groupName === name) return true;
 
-                // 2. Only merge if names are identical
-                return groupName === name;
+                // 2. Cross-source matching via identifiers (Stronger Anchor)
+                const itemPhones = item.phoneNumbers || (item.phone ? [item.phone] : []);
+                const groupPhones = group.phoneNumbers || [];
+                const itemEmails = item.email ? [item.email.toLowerCase()] : (item.emails || []);
+                const groupEmails = group.emails || [];
+
+                if (itemPhones.some(p => groupPhones.includes(p))) return true;
+                if (itemEmails.some(e => groupEmails.includes(e.toLowerCase()))) return true;
+
+                return false;
             });
 
             if (matchedGroup) {
+                // Merge unique identifiers (CRITICAL for Deep Search accuracy)
+                if (item.phoneNumbers) {
+                    item.phoneNumbers.forEach(p => {
+                        if (!matchedGroup.phoneNumbers.includes(p)) matchedGroup.phoneNumbers.push(p);
+                    });
+                }
+                if (item.emails) {
+                    item.emails.forEach(e => {
+                        if (!matchedGroup.emails.includes(e)) matchedGroup.emails.push(e);
+                    });
+                }
+                if (item.email && !matchedGroup.emails.includes(item.email)) {
+                    matchedGroup.emails.push(item.email);
+                }
+
                 // Merge unique descriptions
                 if (item.description && item.description !== 'No description available') {
                     if (!matchedGroup.descriptions.includes(item.description)) {
@@ -292,13 +363,12 @@ const MultiSearchPage = () => {
                 if (!matchedGroup.sources.includes(itemSource)) {
                     matchedGroup.sources.push(itemSource);
                 }
-                // Keep the "Verified" local record's name as primary if available
-                if (item.source === "local" && matchedGroup.source !== "local") {
-                    matchedGroup.name = item.name;
+
+                // Keep the "Verified" local record's ID/metadata as primary
+                if (item.source === "local") {
+                    matchedGroup.id = item.id || matchedGroup.id;
                     matchedGroup.source = "local";
-                } else if (item.name.length > matchedGroup.name.length && matchedGroup.source !== "local") {
-                    // Otherwise keep the longest descriptive name for internet results
-                    matchedGroup.name = item.name;
+                    matchedGroup.metadata = item.metadata || matchedGroup.metadata;
                 }
             } else {
                 let sourceLabel = item.source || "Unknown";
@@ -308,6 +378,8 @@ const MultiSearchPage = () => {
 
                 groups.push({
                     ...item,
+                    phoneNumbers: item.phoneNumbers || (item.phone ? [item.phone] : []),
+                    emails: item.email ? [item.email.toLowerCase()] : (item.emails || []),
                     descriptions: (item.description && item.description !== 'No description available') ? [item.description] : [],
                     sources: [sourceLabel]
                 });
@@ -327,7 +399,7 @@ const MultiSearchPage = () => {
         // B-003: Reset stale metadata instantly
         setData(null);
         setCandidates([]);
-        setLoadProgress(0);
+        setLoadProgress(10); // Start progress immediately at 10%
 
         setStage(STAGES.IDENTIFYING);
 
@@ -346,6 +418,9 @@ const MultiSearchPage = () => {
         const finalQuery = finalSearchName;
 
         const VITE_API_URL = API_URL || "http://localhost:5000";
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s fail-safe
+
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/identify`, {
                 method: "POST",
@@ -355,7 +430,9 @@ const MultiSearchPage = () => {
                     keywords: precisionData?.keyword || "",
                     number: precisionData?.number || ""
                 }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
             // B-002: If it's a phone search, try to find the name early for the progress bar
             if (searchMode === SEARCH_MODES.PHONE) {
@@ -375,6 +452,7 @@ const MultiSearchPage = () => {
             } else if (result.candidates && result.candidates.length > 0) {
                 const grouped = groupCandidates(result.candidates);
                 setCandidates(grouped);
+                setLoadProgress(50); // Jump to 50% when candidates are found
                 setStage(STAGES.SELECTING);
             } else {
                 console.log("[Search] No candidates found. Triggering Precision Search.");
@@ -382,35 +460,56 @@ const MultiSearchPage = () => {
                 setShowFeedbackForm(true);
             }
         } catch (err) {
-            console.error("Identification failed:", err);
+            clearTimeout(timeoutId);
+            if (err.name === 'AbortError') {
+                console.error("Identification timed out after 45s");
+                alert("The search is taking longer than expected. Please try again with more specific keywords.");
+            } else {
+                console.error("Identification failed:", err);
+                alert("Search service is currently unreachable. If you are using the deployed version, please ensure the backend is active and the API URL is configured correctly.");
+            }
+            setLoadProgress(0);
             setStage(STAGES.ENTRY);
-            alert("Search service is currently unreachable. If you are using the deployed version, please ensure the backend is active and the API URL is configured correctly.");
         }
     };
 
     const handleCandidateSelect = async (candidate) => {
         setStage(STAGES.DEEP_LOADING);
+        setLoadProgress(60); // Start deep search at 60%
         setData(prev => ({ ...prev, personaName: candidate.name })); // Ensure name shows in loader
         const VITE_API_URL = API_URL || "http://localhost:5000";
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s fail-safe
+
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/deep`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ person: candidate }),
+                signal: controller.signal
             });
+            clearTimeout(timeoutId);
 
             if (!res.ok) throw new Error(`Deep Search failed with status ${res.status}`);
 
             const result = await res.json();
             setDeepData(result);
+            setLoadProgress(100); // Complete!
             setStage(STAGES.DASHBOARD);
 
             const updated = [candidate.name, ...recent.filter(r => r !== candidate.name)].slice(0, 5);
             setRecent(updated);
             localStorage.setItem("recent-searches", JSON.stringify(updated));
         } catch (err) {
-            console.error("Deep Search failed:", err);
-            alert("Failed to retrieve deep search details. Please check your connection.");
+            clearTimeout(timeoutId);
+            if (err.name === 'AbortError') {
+                console.error("Deep search timed out after 45s");
+                alert("Deep intelligence gathering is taking too long. Please try again later.");
+            } else {
+                console.error("Deep Search failed:", err);
+                alert("Failed to retrieve deep search details. Please check your connection.");
+            }
+            setLoadProgress(0);
         }
     };
 
@@ -427,6 +526,8 @@ const MultiSearchPage = () => {
     const handleReset = () => {
         setStage(STAGES.ENTRY);
         setQuery("");
+        setLoadProgress(0);
+        setCurrentStep(0);
         setDeepData(null);
         setCandidates([]);
         setShowFeedbackForm(false);
@@ -436,18 +537,13 @@ const MultiSearchPage = () => {
         localStorage.removeItem("nexa-candidates");
         localStorage.removeItem("nexa-deep-data");
         localStorage.removeItem("recent-searches");
+
+        // Reset history to clean state
+        window.history.replaceState({ stage: STAGES.ENTRY }, "", "/");
     };
 
     const handleGoBack = () => {
-        if (stage === STAGES.DASHBOARD) {
-            setStage(STAGES.SELECTING);
-            setDeepData(null);
-            localStorage.setItem("lookup-stage", STAGES.SELECTING);
-            localStorage.removeItem("nexa-deep-data");
-        } else if (stage === STAGES.SELECTING) {
-            setStage(STAGES.ENTRY);
-            localStorage.setItem("lookup-stage", STAGES.ENTRY);
-        }
+        window.history.back();
     };
 
     const handleCancel = () => {
@@ -463,35 +559,27 @@ const MultiSearchPage = () => {
         <div className={`saas-layout ${stage === STAGES.ENTRY ? 'stage-entry' : ''}`} style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: stage === STAGES.ENTRY ? 'hidden' : 'auto' }}>
             {/* Top Navigation: Professional SaaS Header */}
             <nav className="navbar">
-                <div className="nav-logo" onClick={handleReset} style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
-                    <img src="/logo.png" alt="Lookup Logo" style={{ height: '60px', objectFit: 'contain' }} />
-                </div>
-
-                <div className="nav-search-container">
+                <div className="nav-left">
                     {stage !== STAGES.ENTRY && (
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <button className="nav-btn secondary" onClick={handleGoBack} style={{ border: '1px solid var(--border-light)', padding: '6px 12px', fontSize: '0.8rem', background: '#fff', borderRadius: 'var(--radius-md)', height: '40px' }}>
-                                ← Back
-                            </button>
-                            <div className="nav-search-bar">
-                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" style={{ color: 'var(--text-muted)' }}>
-                                    <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
-                                </svg>
-                                <input
-                                    className="nav-search-input"
-                                    placeholder="Search new target..."
-                                    value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
-                                    onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
-                                />
-                            </div>
-                        </div>
+                        <button className="nav-back-btn" onClick={handleGoBack} title="Go Back">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M19 12H5M12 19l-7-7 7-7" />
+                            </svg>
+                        </button>
                     )}
                 </div>
 
-                <div className="nav-actions">
-                    <button className="nav-btn secondary">Support</button>
-                    <button className="nav-btn primary">Account</button>
+                <div className="nav-center">
+                    <div className="nav-logo" onClick={handleReset} style={{ cursor: 'pointer' }}>
+                        <img src="/logo.png" alt="LookUp Logo" />
+                    </div>
+                </div>
+
+                <div className="nav-right">
+                    <div className="nav-actions">
+                        <button className="nav-btn secondary desktop-only">Support</button>
+                        <button className="nav-btn primary">Account</button>
+                    </div>
                 </div>
             </nav>
 
@@ -502,6 +590,8 @@ const MultiSearchPage = () => {
                     progress={loadProgress}
                     currentStep={currentStep}
                     onCancel={handleCancel}
+                    query={query}
+                    personaName={data?.personaName}
                 />
             )}
 
@@ -585,7 +675,7 @@ const MultiSearchPage = () => {
 
                 {/* 2. Selecting View (Structured Candidates) */}
                 {stage === STAGES.SELECTING && (
-                    <div className="selecting-view" style={{ padding: '4rem 0' }}>
+                    <div className="selecting-view" style={{ padding: '2rem 0' }}>
                         <div className="animate-fade-up" style={{ marginBottom: '2rem' }}>
                             <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>Potential intel matches</h2>
                         </div>

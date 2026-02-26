@@ -58,14 +58,21 @@ ${JSON.stringify(searchResults, null, 2)}
 `;
 
     try {
-        const chatCompletion = await groq.chat.completions.create({
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Groq API Timeout")), 25000)
+        );
+
+        const groqCall = groq.chat.completions.create({
             messages: [
                 { role: "system", content: systemPrompt },
                 { role: "user", content: prompt }
             ],
-            model: "llama3-8b-8192",
+            model: "llama-3.1-8b-instant",
             temperature: 0.3,
         });
+
+        // Race the Groq call against a 25s timeout
+        const chatCompletion = await Promise.race([groqCall, timeout]);
 
         let text = chatCompletion.choices[0]?.message?.content?.trim() || "";
 
@@ -86,8 +93,9 @@ ${JSON.stringify(searchResults, null, 2)}
             return [];
         }
     } catch (error) {
-        console.error("AI Service Error:", error);
-        throw error;
+        console.error("AI Service Error (Hang/Timeout/Failure):", error.message);
+        // Return empty array on timeout to allow search to proceed with local/raw results
+        return [];
     }
 };
 
@@ -104,7 +112,11 @@ export const generateText = async (prompt) => {
     }
 
     try {
-        const chatCompletion = await groq.chat.completions.create({
+        const timeout = new Promise((_, reject) =>
+            setTimeout(() => reject(new Error("Groq API Timeout (generateText)")), 25000)
+        );
+
+        const groqCall = groq.chat.completions.create({
             messages: [
                 {
                     role: "system",
@@ -112,13 +124,14 @@ export const generateText = async (prompt) => {
                 },
                 { role: "user", content: prompt }
             ],
-            model: "llama3-8b-8192",
+            model: "llama-3.1-8b-instant",
             temperature: 0.5,
         });
 
+        const chatCompletion = await Promise.race([groqCall, timeout]);
         return chatCompletion.choices[0]?.message?.content || "";
     } catch (error) {
-        console.error("AI generateText Error:", error);
-        throw error;
+        console.error("AI generateText Error (Hang/Timeout/Failure):", error.message);
+        return ""; // Return empty string to allow UI to render without summary
     }
 };
