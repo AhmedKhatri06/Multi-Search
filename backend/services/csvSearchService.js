@@ -71,14 +71,14 @@ async function searchSingleCSV(filePath, query, type) {
             const rowPhone = normalizePhoneNumber(phoneVal);
             if (rowPhone && rowPhone.includes(normalizedQuery)) {
                 results.push(row);
-                if (results.length > 5) break;
+                if (results.length >= 5) break;
             }
         } else {
             const nameVal = row.Name || row.name || row.full_name || "";
             const rowName = nameVal.toLowerCase().trim();
-            if (rowName && rowName.includes(normalizedQuery)) {
+            if (rowName && (rowName === normalizedQuery || rowName.includes(normalizedQuery))) {
                 results.push(row);
-                if (results.length > 10) break;
+                if (results.length >= 5) break;
             }
         }
     }

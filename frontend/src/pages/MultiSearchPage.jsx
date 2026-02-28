@@ -765,10 +765,17 @@ const MultiSearchPage = () => {
                             <div className="profile-hero-content">
                                 <div className="profile-avatar-container">
                                     <img
-                                        src={deepData.person.primaryImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff"}
+                                        src={deepData.person.primaryImageObj?.isBlocked ? deepData.person.primaryImageObj.thumbnail : (deepData.person.primaryImage || "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff")}
                                         alt={deepData.person.name}
                                         className="profile-avatar"
-                                        onError={(e) => { e.target.src = "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff"; }}
+                                        onError={(e) => {
+                                            // Fallback chain: original -> thumbnail -> ui-avatar
+                                            if (e.target.src !== deepData.person.primaryImageObj?.thumbnail && deepData.person.primaryImageObj?.thumbnail) {
+                                                e.target.src = deepData.person.primaryImageObj.thumbnail;
+                                            } else {
+                                                e.target.src = "https://ui-avatars.com/api/?name=" + encodeURIComponent(deepData.person.name) + "&background=0D8ABC&color=fff";
+                                            }
+                                        }}
                                     />
                                     <div className="avatar-status-ring"></div>
                                 </div>
@@ -822,17 +829,27 @@ const MultiSearchPage = () => {
                                 </div>
                                 {deepData.images && deepData.images.length > 0 ? (
                                     <div className="gallery-slider">
-                                        {deepData.images.map((img, idx) => (
-                                            <img
-                                                key={idx}
-                                                src={img}
-                                                className="gallery-thumbnail"
-                                                alt="Evidence"
-                                                onClick={() => openPreview(img, 'Media')}
-                                                style={{ cursor: 'pointer' }}
-                                                onError={(e) => { e.target.style.display = 'none'; }}
-                                            />
-                                        ))}
+                                        {deepData.images.map((img, idx) => {
+                                            const displayUrl = img.isBlocked ? img.thumbnail : img.original;
+                                            return (
+                                                <img
+                                                    key={idx}
+                                                    src={displayUrl}
+                                                    className="gallery-thumbnail"
+                                                    alt="Evidence"
+                                                    onClick={() => openPreview(img.original, 'Media')}
+                                                    style={{ cursor: 'pointer' }}
+                                                    onError={(e) => {
+                                                        // If original failed and we weren't already using thumbnail, try thumbnail
+                                                        if (e.target.src !== img.thumbnail && img.thumbnail) {
+                                                            e.target.src = img.thumbnail;
+                                                        } else {
+                                                            e.target.style.display = 'none';
+                                                        }
+                                                    }}
+                                                />
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <div className="empty-state">No media data available</div>

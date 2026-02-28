@@ -1,21 +1,43 @@
 import express from "express";
 import dotenv from "dotenv";
-import Document from "../models/Document.js";
-import SearchCache from "../models/SearchCache.js";
-import { sqliteSearch } from "../db/sqlite.js";
-
 import axios from "axios";
+import FormInfo from "../models/FormInfo.js";
+import SearchCache from "../models/SearchCache.js";
+import Document from "../models/Document.js";
+import { sqliteSearch } from "../db/sqlite.js";
 import { identifyPeople } from "../services/aiService.js";
 import { extractSocialAccounts } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts } from "../utils/searchHelper.js";
 import { searchCSVs } from "../services/csvSearchService.js";
 import { searchImages, calculateImageScore } from "../services/internetSearch.js";
-import FormInfo from "../models/FormInfo.js";
 
 dotenv.config();
 
 const router = express.Router();
+
+// Helper to normalize image URLs and handle blocked proxies
+const normalizeImageUrl = (url, thumbnail) => {
+    if (!url) return null;
+
+    // Normalize malformed strings like x-raw-image:///
+    let normalized = url;
+    if (url.startsWith('x-raw-image:///')) {
+        // Strip prefix, check if the remaining part looks like an absolute URL elsewhere, 
+        // but usually these are non-renderable raw refs. Fallback to thumbnail immediately.
+        return thumbnail || null;
+    }
+
+    // Identify blocked domains that need thumbnail preference
+    const blockedDomains = ['instagram.com', 'fbcdn.net', 'facebook.com', 'pinterest.com'];
+    const isBlocked = blockedDomains.some(d => url.includes(d));
+
+    return {
+        original: normalized,
+        thumbnail: thumbnail || normalized,
+        isBlocked
+    };
+};
 
 function normalize(value = "") {
     return value
@@ -62,7 +84,7 @@ export async function performSearch(query, simpleMode = false) {
     const cacheType = simpleMode ? "SEARCH" : "SEARCH"; 
     const cached = await SearchCache.findOne({ query: normQuery, type: cacheType });
     if (cached) {
-      console.log(`[CACHE HIT] ${cacheType}: "${normQuery}"`);
+      console.log(`[CACHE HIT] ${ cacheType }: "${normQuery}"`);
       return cached.data;
     }
     */
@@ -110,7 +132,7 @@ export async function performSearch(query, simpleMode = false) {
         const parts = (p.text || "").split(" - ");
         const rowName = parts[0]?.trim() || "";
         const rowTitle = parts.slice(1).join(" - ").trim() || "";
-        internetQuery = `${rowName} ${rowTitle}`.trim() || query;
+        internetQuery = `${rowName} ${rowTitle} `.trim() || query;
     }
 
     // REAL INTERNET SEARCH – SERPAPI
@@ -147,8 +169,8 @@ export async function performSearch(query, simpleMode = false) {
 
         const results = response.data?.organic || [];
 
-        console.log(`[Serper.dev] Mode: ${simpleMode ? "SIMPLE" : "DEEP"} | Goal: ${socialQuery}`);
-        console.log(`[Serper.dev] Raw Results: ${results.length}`);
+        console.log(`[Serper.dev] Mode: ${simpleMode ? "SIMPLE" : "DEEP"} | Goal: ${socialQuery} `);
+        console.log(`[Serper.dev] Raw Results: ${results.length} `);
 
         results.forEach((item, index) => {
             let provider = "Google";
@@ -160,7 +182,7 @@ export async function performSearch(query, simpleMode = false) {
             const titleLower = title.toLowerCase();
             const targetNameStr = targetName.toLowerCase();
 
-            console.log(`[Loop] Result: "${title}" | Provider: ${provider}`);
+            console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
 
             // 0. Provider Labeling (Before filters)
             if (link.includes("linkedin.com")) provider = "LinkedIn";
@@ -177,7 +199,7 @@ export async function performSearch(query, simpleMode = false) {
             const hasFirstPart = title.includes(nameParts[0]);
             if (!hasFirstPart) {
                 if (!snippet.includes(nameParts[0])) {
-                    console.log(`[Filter] Dropped (Name Mismatch: '${nameParts[0]}'): ${title}`);
+                    console.log(`[Filter] Dropped(Name Mismatch: '${nameParts[0]}'): ${title} `);
                     return;
                 }
             }
@@ -199,7 +221,7 @@ export async function performSearch(query, simpleMode = false) {
                             const wordBefore = wordsBefore[wordsBefore.length - 1];
 
                             if (wordBefore && !allowedPrefixes.includes(wordBefore) && isNaN(wordBefore) && provider === "Google") {
-                                console.log(`[Filter] Dropped (Prefix '${wordBefore}'): ${title}`);
+                                console.log(`[Filter] Dropped(Prefix '${wordBefore}'): ${title} `);
                                 return;
                             }
                         }
@@ -217,7 +239,7 @@ export async function performSearch(query, simpleMode = false) {
                             const wordAfter = wordsAfter[0];
 
                             if (wordAfter && !allowedSuffixes.includes(wordAfter) && isNaN(wordAfter) && wordAfter.length > 1 && provider === "Google") {
-                                console.log(`[Filter] Dropped (Postfix '${wordAfter}'): ${title}`);
+                                console.log(`[Filter] Dropped(Postfix '${wordAfter}'): ${title} `);
                                 return;
                             }
                         }
@@ -240,7 +262,7 @@ export async function performSearch(query, simpleMode = false) {
                     snippet.includes("results found for");
 
                 if (isDirectory) {
-                    console.log(`[Filter] Dropped (Directory): ${title}`);
+                    console.log(`[Filter] Dropped(Directory): ${title} `);
                     return;
                 }
 
@@ -255,20 +277,20 @@ export async function performSearch(query, simpleMode = false) {
                 ];
                 const isArticle = articleKeywords.some(keyword => title.includes(keyword) || snippet.includes(keyword));
                 if (isArticle) {
-                    console.log(`[Filter] Dropped (Article): ${title}`);
+                    console.log(`[Filter] Dropped(Article): ${title} `);
                     return;
                 }
 
                 const noisePatterns = ["photo by", "photograph by", "congratulations to", "congrats to", "proud of", "event", "album", "wedding of", "funeral of", "in memory of", "condolences", "article by"];
                 const isNoise = noisePatterns.some(ptn => title.includes(ptn) || snippet.includes(ptn));
                 if (isNoise) {
-                    console.log(`[Filter] Dropped (Noise): ${title}`);
+                    console.log(`[Filter] Dropped(Noise): ${title} `);
                     return;
                 }
             }
 
             internetResults.push({
-                id: `google-${index}`,
+                id: `google - ${index} `,
                 title: item.title || "Untitled Result",
                 text: item.snippet || "No description available",
                 url: item.link || "",
@@ -341,22 +363,28 @@ router.post("/identify", async (req, res) => {
 
     try {
         const inputType = detectInputType(name);
-        console.log(`[Identify] Detected Type: ${inputType} | Query: ${name} | Keyword: ${keywords} | Number: ${number}`);
+        console.log(`[Identify] Detected Type: ${inputType} | Query: ${name} | Keyword: ${keywords} | Number: ${number} `);
 
         // 1. Search Local Sources (Priority 1)
         // If 'number' is provided, we prioritize searching by that in local DBs
         const searchQuery = number || name;
         const searchType = number ? "PHONE" : inputType;
 
+        console.log(`[Identify] Searching CSVs for: ${searchQuery}`);
         const csvResults = await searchCSVs(searchQuery, searchType);
-        const { sqliteSearch: internalSqliteSearch } = await import("../db/sqlite.js");
-        const sqliteResults = internalSqliteSearch(searchQuery);
+        console.log(`[Identify] CSV Results: ${csvResults.length}`);
+
+        console.log(`[Identify] Searching SQLite for: ${searchQuery}`);
+        const sqliteResults = sqliteSearch(searchQuery);
+        console.log(`[Identify] SQLite Results: ${sqliteResults.length}`);
 
         let mongoResults = [];
         try {
+            console.log(`[Identify] Searching MongoDB for: ${searchQuery}`);
             mongoResults = await Document.find({
                 text: { $regex: searchQuery, $options: "i" }
             }).limit(10).lean();
+            console.log(`[Identify] MongoDB Results: ${mongoResults.length}`);
         } catch (dbErr) {
             console.warn("[MongoDB] Identify failed:", dbErr.message);
         }
@@ -364,7 +392,7 @@ router.post("/identify", async (req, res) => {
         // Map local data to a common candidate structure
         const localCandidates = [
             ...csvResults.map(r => ({
-                name: r.name + (keywords ? ` ${keywords}` : ""),
+                name: r.name + (keywords ? ` ${keywords} ` : ""),
                 description: r.description || "Identified in CSV Archive",
                 location: r.location || "Archives",
                 confidence: "Verified",
@@ -379,7 +407,7 @@ router.post("/identify", async (req, res) => {
                 const parts = (p.text || "").split(" - ");
                 const baseName = parts[0]?.trim() || "Unknown";
                 return {
-                    name: baseName + (keywords ? ` ${keywords}` : ""),
+                    name: baseName + (keywords ? ` ${keywords} ` : ""),
                     description: parts.slice(1).join(" - ").trim() || "Identity SQL Record",
                     location: p.location || "Identity SQL",
                     confidence: "Verified",
@@ -392,7 +420,7 @@ router.post("/identify", async (req, res) => {
                 };
             }),
             ...mongoResults.map(d => ({
-                name: (inputType === "PHONE" ? "Potential Lead" : name) + (keywords ? ` ${keywords}` : ""),
+                name: (inputType === "PHONE" ? "Potential Lead" : name) + (keywords ? ` ${keywords} ` : ""),
                 description: d.text.substring(0, 150) + "...",
                 location: "Cluster DB Archives",
                 confidence: "Verified",
@@ -423,7 +451,7 @@ router.post("/identify", async (req, res) => {
         // Fallback: If no results for filtered search, try simple search
         if ((!searchResults || searchResults.length === 0) && inputType === "NAME") {
             console.log("[Identify] Filtered search yielded no results, falling back to simple search.");
-            const simpleQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
+            const simpleQuery = `${name} ${location || ""} ${keywords || ""} `.trim();
             searchResults = await performSearch(simpleQuery, true);
         }
 
@@ -442,7 +470,7 @@ router.post("/identify", async (req, res) => {
                     return {
                         ...c,
                         source: "internet",
-                        name: hasKeyword ? cName : cName + (keywords ? ` - ${keywords}` : ""),
+                        name: hasKeyword ? cName : cName + (keywords ? ` - ${keywords} ` : ""),
                         keywordMatched: keywords || ""
                     };
                 });
@@ -450,7 +478,7 @@ router.post("/identify", async (req, res) => {
                 // If AI finds nothing but we have results, provide raw results as fallback
                 if ((!internetCandidates || internetCandidates.length === 0)) {
                     internetCandidates = searchResults.map(r => ({
-                        name: r.title.split(/[-|]/)[0].trim() + (keywords ? ` ${keywords}` : ""),
+                        name: r.title.split(/[-|]/)[0].trim() + (keywords ? ` ${keywords} ` : ""),
                         description: r.text || "Web result",
                         location: r.provider || "Internet",
                         confidence: "Medium",
@@ -465,7 +493,7 @@ router.post("/identify", async (req, res) => {
                     const title = r.title.split(/[-|]/)[0].trim();
                     const hasKeyword = keywords && title.toLowerCase().includes(keywords.toLowerCase());
                     return {
-                        name: hasKeyword ? title : title + (keywords ? ` ${keywords}` : ""),
+                        name: hasKeyword ? title : title + (keywords ? ` ${keywords} ` : ""),
                         description: r.text || "No details available",
                         location: r.provider || "Web",
                         confidence: "High",
@@ -487,7 +515,7 @@ router.post("/identify", async (req, res) => {
         let resolvedPersona = null;
 
         if (inputType === "PHONE" && localCandidates.length === 1) {
-            console.log(`[Identify] Direct Resolution Triggered for: ${localCandidates[0].name}`);
+            console.log(`[Identify] Direct Resolution Triggered for: ${localCandidates[0].name} `);
             directResolve = true;
             resolvedPersona = localCandidates[0];
         }
@@ -495,7 +523,7 @@ router.post("/identify", async (req, res) => {
         combined.forEach(c => {
             const normName = (c.name || "").toLowerCase().trim();
             const normUrl = (c.url || "").toLowerCase().trim();
-            const key = normUrl ? `${normName}||${normUrl}` : normName;
+            const key = normUrl ? `${normName}|| ${normUrl} ` : normName;
 
             if (!dedupedMap.has(key)) {
                 dedupedMap.set(key, c);
@@ -560,7 +588,7 @@ router.post("/deep", async (req, res) => {
         // More aggressive: if the keyword is anywhere in the name, try to extract just the first two words as the base name
         const nameParts = name.split(' ');
         if (nameParts.length > 2) {
-            name = `${nameParts[0]} ${nameParts[1]}`;
+            name = `${nameParts[0]} ${nameParts[1]} `;
         }
     }
 
@@ -578,7 +606,7 @@ router.post("/deep", async (req, res) => {
     const location = scrub(person.location || "");
     const profession = scrub(person.description || "");
 
-    console.log(`[Deep Search] Target: ${name} | Keyword: ${keyword} | Location: ${location}`);
+    console.log(`[Deep Search]Target: ${name} | Keyword: ${keyword} | Location: ${location} `);
 
     try {
         // 1. Priority 1: Search Local Database & CSVs with Fuzzy Matching
@@ -588,7 +616,7 @@ router.post("/deep", async (req, res) => {
 
         // Extract a fuzzy search term (e.g., first two names) to catch records like "Ahmed Khatri Student"
         const nameParts = name.split(' ');
-        const fuzzyName = nameParts.length > 1 ? `${nameParts[0]} ${nameParts[1]}` : name;
+        const fuzzyName = nameParts.length > 1 ? `${nameParts[0]} ${nameParts[1]} ` : name;
 
         try {
             // Search with both specific and fuzzy names
@@ -649,26 +677,26 @@ router.post("/deep", async (req, res) => {
         let anchorQuery = "";
         const emailAnchor = targetEmails.length > 0 ? ` "${targetEmails[0]}"` : "";
         const phoneAnchor = targetPhones.length > 0 ? ` "${targetPhones[0]}"` : "";
-        anchorQuery = `${emailAnchor}${phoneAnchor}`;
+        anchorQuery = `${emailAnchor}${phoneAnchor} `;
 
         // Query 1: Targeted Social Sweep (Strict with anchors)
         const hasK = keyword && name.toLowerCase().includes(keyword.toLowerCase());
-        const socialQueryStrict = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
+        const socialQueryStrict = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site: linkedin.com/in/ OR site: github.com OR site: twitter.com OR site: instagram.com OR site: facebook.com)`.trim();
 
         // Query 1b: Broad Social Sweep (Fallback if anchors fail)
-        const socialQueryBroad = `"${name}" ${hasK ? "" : keyword} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
+        const socialQueryBroad = `"${name}" ${hasK ? "" : keyword} (site: linkedin.com/in/ OR site: github.com OR site: twitter.com OR site: instagram.com OR site: facebook.com)`.trim();
 
         // Query 2: Broad Context Sweep (Contacts/Emails focus)
         const contextKeywords = keyword || cleanProfession || "profile OR bio OR contact";
-        const contextQueryStrict = `"${name}" ${cleanLocation} ${contextKeywords}${anchorQuery}`.trim();
-        const contextQueryBroad = `"${name}" ${cleanLocation} ${contextKeywords}`.trim();
+        const contextQueryStrict = `"${name}" ${cleanLocation} ${contextKeywords}${anchorQuery} `.trim();
+        const contextQueryBroad = `"${name}" ${cleanLocation} ${contextKeywords} `.trim();
 
         // Query 3: Image Sweep - Enhanced with context to avoid name collisions
         const professionTerms = cleanProfession ? cleanProfession.split(/[\s,]+/).filter(t => t.length > 3) : [];
         const descriptionTerms = person.description ? person.description.split(/[\s,]+/).filter(t => t.length > 3) : [];
         const contextKeywordsList = [...new Set([...professionTerms, ...descriptionTerms])].slice(0, 5); // Pick top 5 markers
 
-        console.log(`[Deep Search] Using context markers for image validation: ${contextKeywordsList.join(', ')}`);
+        console.log(`[Deep Search] Using context markers for image validation: ${contextKeywordsList.join(', ')} `);
 
         const imageQuery = `"${name}" ${cleanProfession} "profile picture" OR "portrait"`.trim();
         const fallbackImageQuery = `"${name}" ${cleanProfession} headshot`.trim();
@@ -718,8 +746,8 @@ router.post("/deep", async (req, res) => {
             });
         }
 
-        console.log(`[Deep Search] Social profiles found: ${socialProfiles.length}`);
-        socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url}) [score: ${s.identityScore}]`));
+        console.log(`[Deep Search] Social profiles found: ${socialProfiles.length} `);
+        socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url})[score: ${s.identityScore}]`));
 
         // 4. Extract Contacts
         const webPhones = new Set();
@@ -751,11 +779,16 @@ router.post("/deep", async (req, res) => {
 
         // 5b. Images from specialized image search (High Trust if scored)
         finalImageResults.forEach(img => {
+            const normalized = normalizeImageUrl(img.imageUrl, img.thumbnailUrl);
+            if (!normalized) return;
+
             candidateImages.push({
-                url: img.imageUrl,
+                url: normalized.original,
+                thumbnail: normalized.thumbnail,
                 score: img.confidence || 50,
                 source: 'Image Search',
-                type: 'organic'
+                type: 'organic',
+                isBlocked: normalized.isBlocked
             });
         });
 
@@ -795,20 +828,42 @@ router.post("/deep", async (req, res) => {
                 // FINAL GATE: If an image has a very low score, don't show it at all
                 // SOFTENED: Matches service threshold of 10
                 if (img.score < 10 && img.type !== 'profile') {
-                    console.log(`[Image Selection] Rejecting low-confidence image: ${img.url} (Score: ${img.score})`);
+                    console.log(`[Image Selection] Rejecting low - confidence image: ${img.url} (Score: ${img.score})`);
                     return;
                 }
                 seenUrls.add(img.url);
                 rankedImages.push(img);
             });
 
-        // Determine Primary Image
-        let primaryImage = person.primaryImage || person.image || "";
-        if (!primaryImage && rankedImages.length > 0) {
-            primaryImage = rankedImages[0].url;
+        // Determine Primary Image (favoring thumbnails for blocked domains)
+        let primaryImageObj = null;
+        if (person.primaryImage || person.image) {
+            const pNorm = normalizeImageUrl(person.primaryImage || person.image);
+            if (pNorm) {
+                primaryImageObj = {
+                    original: pNorm.original,
+                    thumbnail: pNorm.thumbnail,
+                    isBlocked: pNorm.isBlocked
+                };
+            }
         }
 
-        const finalImageUrls = rankedImages.map(img => img.url).slice(0, 20);
+        if (!primaryImageObj && rankedImages.length > 0) {
+            const best = rankedImages[0];
+            primaryImageObj = {
+                original: best.url,
+                thumbnail: best.thumbnail || best.url,
+                isBlocked: best.isBlocked
+            };
+        }
+
+        const finalImages = rankedImages.map(img => ({
+            original: img.url,
+            thumbnail: img.thumbnail || img.url,
+            source: img.source,
+            score: img.score,
+            isBlocked: img.isBlocked
+        })).slice(0, 20);
 
         // 6. Article Extraction (excluding results identified as social)
         const socialUrls = new Set(socialProfiles.map(s => s.url.toLowerCase()));
@@ -821,13 +876,14 @@ router.post("/deep", async (req, res) => {
             person: {
                 ...person,
                 name,
-                primaryImage: primaryImage || finalImageUrls[0] || "",
+                primaryImage: primaryImageObj ? (primaryImageObj.isBlocked ? primaryImageObj.thumbnail : primaryImageObj.original) : "",
+                primaryImageObj: primaryImageObj, // Pass full object for frontend resilience
                 phoneNumbers: [...new Set([...localPhones, ...webPhones])],
                 emails: [...new Set([...localEmails, ...webEmails])]
             },
             localData: localResults,
             socials: socialProfiles,
-            images: finalImageUrls,
+            images: finalImages,
             articles: articles
         });
     } catch (err) {
