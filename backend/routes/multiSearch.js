@@ -10,7 +10,7 @@ import { extractSocialAccounts } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts } from "../utils/searchHelper.js";
 import { searchCSVs } from "../services/csvSearchService.js";
-import { searchImages } from "../services/internetSearch.js";
+import { searchImages, calculateImageScore } from "../services/internetSearch.js";
 import FormInfo from "../models/FormInfo.js";
 
 dotenv.config();
@@ -635,43 +635,89 @@ router.post("/deep", async (req, res) => {
         const cleanProfession = (profession && profession.toLowerCase() !== "none") ? profession.substring(0, 50) : "";
 
         // ID Anchoring: Use known emails/phones to force specific results
-        const targetEmails = person.emails || (person.email ? [person.email] : []);
-        const targetPhones = person.phoneNumbers || (person.phone ? [person.phone] : []);
+        // Merge identifiers from the clicked person AND any discovered local records
+        const targetEmails = [...new Set([
+            ...(person.emails || (person.email ? [person.email] : [])),
+            ...Array.from(localEmails)
+        ])];
+        const targetPhones = [...new Set([
+            ...(person.phoneNumbers || (person.phone ? [person.phone] : [])),
+            ...Array.from(localPhones)
+        ])];
 
         // Build anchor string for search queries
         let anchorQuery = "";
-        if (targetEmails.length > 0) anchorQuery += ` "${targetEmails[0]}"`;
-        if (targetPhones.length > 0) anchorQuery += ` "${targetPhones[0]}"`;
+        const emailAnchor = targetEmails.length > 0 ? ` "${targetEmails[0]}"` : "";
+        const phoneAnchor = targetPhones.length > 0 ? ` "${targetPhones[0]}"` : "";
+        anchorQuery = `${emailAnchor}${phoneAnchor}`;
 
-        // Query 1: Targeted Social Sweep (Search name + keyword + identifiers)
+        // Query 1: Targeted Social Sweep (Strict with anchors)
         const hasK = keyword && name.toLowerCase().includes(keyword.toLowerCase());
-        const socialQuery = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
+        const socialQueryStrict = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
+
+        // Query 1b: Broad Social Sweep (Fallback if anchors fail)
+        const socialQueryBroad = `"${name}" ${hasK ? "" : keyword} (site:linkedin.com/in/ OR site:github.com OR site:twitter.com OR site:instagram.com OR site:facebook.com)`.trim();
 
         // Query 2: Broad Context Sweep (Contacts/Emails focus)
         const contextKeywords = keyword || cleanProfession || "profile OR bio OR contact";
-        const contextQuery = `"${name}" ${cleanLocation} ${contextKeywords}${anchorQuery}`.trim();
+        const contextQueryStrict = `"${name}" ${cleanLocation} ${contextKeywords}${anchorQuery}`.trim();
+        const contextQueryBroad = `"${name}" ${cleanLocation} ${contextKeywords}`.trim();
 
-        // Query 3: Image Sweep
+        // Query 3: Image Sweep - Enhanced with context to avoid name collisions
+        const professionTerms = cleanProfession ? cleanProfession.split(/[\s,]+/).filter(t => t.length > 3) : [];
+        const descriptionTerms = person.description ? person.description.split(/[\s,]+/).filter(t => t.length > 3) : [];
+        const contextKeywordsList = [...new Set([...professionTerms, ...descriptionTerms])].slice(0, 5); // Pick top 5 markers
+
+        console.log(`[Deep Search] Using context markers for image validation: ${contextKeywordsList.join(', ')}`);
+
         const imageQuery = `"${name}" ${cleanProfession} "profile picture" OR "portrait"`.trim();
         const fallbackImageQuery = `"${name}" ${cleanProfession} headshot`.trim();
 
-        const [socialResults, contextResults, initialImageResults] = await Promise.all([
-            performSearch(socialQuery, true),
-            performSearch(contextQuery, true),
-            searchImages(imageQuery, name, cleanProfession)
+        // EXECUTION: Perform both strict and broad sweeps in parallel (Serper is fast)
+        // EXECUTION: Perform sweeps with optimized query volume
+        const [socialStrict, socialBroad, contextBroad, initialImageResults] = await Promise.all([
+            performSearch(socialQueryStrict, true).catch(() => []),
+            performSearch(socialQueryBroad, true).catch(() => []),
+            performSearch(contextQueryBroad, true).catch(() => []),
+            searchImages(imageQuery, name, contextKeywordsList).catch(() => [])
         ]);
+
+        // Merge and deduplicate results, favoring strict matches
+        const socialResults = [...socialStrict];
+        socialBroad.forEach(r => {
+            if (!socialResults.some(sr => sr.url === r.url)) socialResults.push(r);
+        });
+
+        const contextResults = [...socialResults, ...contextBroad];
 
         let finalImageResults = initialImageResults;
         if (finalImageResults.length === 0) {
             console.log("[Deep Search] Image search returned 0, attempting fallback...");
-            finalImageResults = await searchImages(fallbackImageQuery, name, cleanProfession);
+            finalImageResults = await searchImages(fallbackImageQuery, name, contextKeywordsList);
         }
 
         const allSearchItems = [...socialResults, ...contextResults];
 
         // 3. Robust Social Discovery using specialized service with anchors
         const queryWords = name.split(' ');
-        const socialProfiles = extractSocialAccounts(allSearchItems, name, queryWords, cleanLocation, targetEmails, targetPhones);
+        let socialProfiles = extractSocialAccounts(allSearchItems, name, queryWords, cleanLocation, targetEmails, targetPhones);
+
+        // CRITICAL FIX: Merge social accounts ALREADY present in the candidate/person data
+        // This ensures that if the user clicks a card with a link, it shows up in the dashboard
+        if (person.socials && Array.isArray(person.socials)) {
+            person.socials.forEach(s => {
+                const normUrl = s.url.split('?')[0].replace(/\/$/, '').toLowerCase();
+                if (!socialProfiles.some(sp => sp.url.split('?')[0].replace(/\/$/, '').toLowerCase() === normUrl)) {
+                    socialProfiles.push({
+                        ...s,
+                        confidence: 'high',
+                        identityScore: 100,
+                        source: 'Local Archive'
+                    });
+                }
+            });
+        }
+
         console.log(`[Deep Search] Social profiles found: ${socialProfiles.length}`);
         socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url}) [score: ${s.identityScore}]`));
 
@@ -684,27 +730,85 @@ router.post("/deep", async (req, res) => {
             extracted.emails.forEach(e => webEmails.add(e));
         });
 
-        // 5. Image Ranking & Selection
-        // Try to find a primary image (LinkedIn usually has the best)
+        // 5. Image Ranking & Selection Pipeline
         const linkedInProfile = socialProfiles.find(s => s.platform.toLowerCase() === 'linkedin');
-        let primaryImage = person.image || "";
+        const twitterProfile = socialProfiles.find(s => s.platform.toLowerCase() === 'twitter');
 
-        if (!primaryImage && linkedInProfile) {
-            // Find the search result associated with this LinkedIn URL to get its thumbnail
-            const liResult = socialResults.find(r => r.url.toLowerCase().includes(linkedInProfile.url.toLowerCase()));
-            if (liResult && liResult.images && liResult.images.length > 0) {
-                primaryImage = liResult.images[0];
+        // Collect all potential images with metadata for ranking
+        const candidateImages = [];
+
+        // 5a. Images from social profile thumbnails (Highest Trust)
+        socialProfiles.forEach(s => {
+            if (s.thumbnail) {
+                candidateImages.push({
+                    url: s.thumbnail,
+                    score: 100, // Direct match from verified profile
+                    source: s.platform,
+                    type: 'profile'
+                });
             }
+        });
+
+        // 5b. Images from specialized image search (High Trust if scored)
+        finalImageResults.forEach(img => {
+            candidateImages.push({
+                url: img.imageUrl,
+                score: img.confidence || 50,
+                source: 'Image Search',
+                type: 'organic'
+            });
+        });
+
+        // 5c. Images from organic search snippets (Lower Trust, now scored strictly)
+        allSearchItems.forEach(r => {
+            if (r.images && r.images.length > 0) {
+                // If the URL matches our candidate's social URL, boost it
+                const isSocialMatch = socialProfiles.some(s => r.url.toLowerCase().includes(s.url.toLowerCase()));
+
+                r.images.forEach(imgUrl => {
+                    // Use unified scoring for organic images with professional context
+                    const organicScore = calculateImageScore({
+                        imageUrl: imgUrl,
+                        title: r.title,
+                        link: r.url
+                    }, name, contextKeywordsList);
+
+                    candidateImages.push({
+                        url: imgUrl,
+                        score: isSocialMatch ? Math.max(organicScore, 80) : organicScore,
+                        source: r.provider || 'Web',
+                        type: 'organic'
+                    });
+                });
+            }
+        });
+
+        // Deduplicate, Filter by Score, and Rank
+        const rankedImages = [];
+        const seenUrls = new Set();
+
+        candidateImages
+            .sort((a, b) => b.score - a.score)
+            .forEach(img => {
+                if (!img.url || seenUrls.has(img.url)) return;
+
+                // FINAL GATE: If an image has a very low score, don't show it at all
+                // SOFTENED: Matches service threshold of 10
+                if (img.score < 10 && img.type !== 'profile') {
+                    console.log(`[Image Selection] Rejecting low-confidence image: ${img.url} (Score: ${img.score})`);
+                    return;
+                }
+                seenUrls.add(img.url);
+                rankedImages.push(img);
+            });
+
+        // Determine Primary Image
+        let primaryImage = person.primaryImage || person.image || "";
+        if (!primaryImage && rankedImages.length > 0) {
+            primaryImage = rankedImages[0].url;
         }
 
-        const allImages = [
-            primaryImage,
-            ...(finalImageResults.map(img => img.imageUrl)),
-            ...(allSearchItems.flatMap(r => r.images || []))
-        ].filter(Boolean);
-
-        // Deduplicate and slice images
-        const uniqueImages = [...new Set(allImages)].slice(0, 20);
+        const finalImageUrls = rankedImages.map(img => img.url).slice(0, 20);
 
         // 6. Article Extraction (excluding results identified as social)
         const socialUrls = new Set(socialProfiles.map(s => s.url.toLowerCase()));
@@ -717,17 +821,16 @@ router.post("/deep", async (req, res) => {
             person: {
                 ...person,
                 name,
-                primaryImage: primaryImage || uniqueImages[0] || "",
+                primaryImage: primaryImage || finalImageUrls[0] || "",
                 phoneNumbers: [...new Set([...localPhones, ...webPhones])],
                 emails: [...new Set([...localEmails, ...webEmails])]
             },
             localData: localResults,
             socials: socialProfiles,
-            images: uniqueImages,
+            images: finalImageUrls,
             articles: articles
         });
-    }
-    catch (err) {
+    } catch (err) {
         console.error("Deep search failed:", err);
         res.status(500).json({ error: "Deep search failed" });
     }

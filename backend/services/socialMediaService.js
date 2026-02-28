@@ -138,7 +138,8 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         const identityScore = calculateIdentityScore(result, personName, keywords, location, targetEmails, targetPhones);
 
         // Reject low confidence matches
-        if (identityScore < 30) {
+        // SOFTENED: Lowered to 10 for better recall, relying on deduplication for accuracy
+        if (identityScore < 10) {
             console.log(`  [Skip] ${platform}: Score too low (${identityScore}) -> ${link}`);
             return;
         }
@@ -173,8 +174,19 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         return a.priority - b.priority;
     });
 
-    console.log(`[Social Discovery] Final count: ${socialAccounts.length}`);
-    return socialAccounts;
+    // Per-Platform Deduplication: Keep only the best match per platform
+    const platformToBestAccount = new Map();
+    socialAccounts.forEach(acc => {
+        const platformKey = acc.platform.toLowerCase();
+        if (!platformToBestAccount.has(platformKey)) {
+            platformToBestAccount.set(platformKey, acc);
+        }
+    });
+
+    const dedupedAccounts = Array.from(platformToBestAccount.values());
+
+    console.log(`[Social Discovery] Final count (deduped): ${dedupedAccounts.length}`);
+    return dedupedAccounts;
 }
 
 export { calculateIdentityScore };
