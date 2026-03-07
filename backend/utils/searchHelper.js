@@ -26,10 +26,20 @@ export function normalizeName(name) {
     // 1. Convert to lowercase and trim
     let n = name.toLowerCase().trim();
 
-    // 2. Remove common titles and suffixes (e.g., Mr., Dr., CEO, Founder)
+    // 2. Handle common separators - if there's a dash, pipe, or comma, 
+    // the name is usually BEFORE the separator.
+    const separators = [" - ", " | ", " , ", " at ", " @ "];
+    separators.forEach(sep => {
+        if (n.includes(sep)) {
+            n = n.split(sep)[0].trim();
+        }
+    });
+
+    // 3. Remove common titles and suffixes (e.g., Mr., Dr., CEO, Founder)
     const junkPatterns = [
         /\b(mr|mrs|ms|dr|prof|sir|lord)\.?\s+/gi,
-        /\s+\b(ceo|cto|cfo|md|phd|manager|director|founder|co-founder|student|engineer|developer|associates|lead)\b/gi,
+        /\b(ceo|cto|cfo|md|phd|manager|director|founder|co-founder|student|engineer|developer|associates|lead|author|contributor)\b/gi,
+        /\b(infotech|private|limited|pvt|ltd|inc|corp|corporation|group|solutions|services|technologies)\b/gi,
         /\s+\b(jr|sr|iii|iv|v)\b\.?$/gi,
         /["'()|,\-]/g // Strip quotes, parens, and separators
     ];
@@ -38,7 +48,7 @@ export function normalizeName(name) {
         n = n.replace(pattern, " ");
     });
 
-    // 3. Compact whitespace and sort words (to handle "Ahmed Khatri" vs "Khatri Ahmed")
+    // 4. Compact whitespace and sort words 
     return n.split(/\s+/).filter(word => word.length > 1).sort().join(" ").trim();
 }
 

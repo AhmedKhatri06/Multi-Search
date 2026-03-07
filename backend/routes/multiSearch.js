@@ -393,9 +393,10 @@ router.post("/identify", async (req, res) => {
         // Map local data to a common candidate structure
         const localCandidates = [
             ...csvResults.map(r => ({
-                name: r.name + (keywords ? ` ${keywords} ` : ""),
+                name: r.name,
                 description: r.description || "Identified in CSV Archive",
                 location: r.location || "Archives",
+                company: r.company || r.CompanyName || keywords || "",
                 confidence: "Verified",
                 source: "local",
                 url: "",
@@ -406,11 +407,12 @@ router.post("/identify", async (req, res) => {
             })),
             ...sqliteResults.map(p => {
                 const parts = (p.text || "").split(" - ");
-                const baseName = parts[0]?.trim() || "Unknown";
+                const baseName = p.name || parts[0]?.trim() || "Unknown";
                 return {
-                    name: baseName + (keywords ? ` ${keywords} ` : ""),
-                    description: parts.slice(1).join(" - ").trim() || "Identity SQL Record",
+                    name: baseName,
+                    description: p.title || p.description || parts.slice(1).join(" - ").trim() || "Identity SQL Record",
                     location: p.location || "Identity SQL",
+                    company: p.company || keywords || "",
                     confidence: "Verified",
                     source: "local",
                     url: p.url || "",
@@ -421,9 +423,10 @@ router.post("/identify", async (req, res) => {
                 };
             }),
             ...mongoResults.map(d => ({
-                name: (inputType === "PHONE" ? "Potential Lead" : name) + (keywords ? ` ${keywords} ` : ""),
+                name: (inputType === "PHONE" ? "Potential Lead" : name),
                 description: d.text.substring(0, 150) + "...",
                 location: "Cluster DB Archives",
+                company: d.company || keywords || "",
                 confidence: "Verified",
                 source: "local",
                 url: "",
@@ -482,6 +485,7 @@ router.post("/identify", async (req, res) => {
                         name: r.title.split(/[-|]/)[0].trim() + (keywords ? ` ${keywords} ` : ""),
                         description: r.text || "Web result",
                         location: r.provider || "Internet",
+                        company: keywords || "", // Added company field
                         confidence: "Medium",
                         source: "internet",
                         url: r.url,
@@ -515,16 +519,22 @@ router.post("/identify", async (req, res) => {
             const rawName = candidate.name || "Unknown";
             const normName = normalizeName(rawName);
             const normCompany = (candidate.company || "").toLowerCase().trim().replace(/[^a-z0-9]/g, "");
-            const normRole = (candidate.description || candidate.jobTitle || "").toLowerCase().trim().replace(/[^a-z0-9]/g, "");
 
-            // Composite Key: Name + Company (if available)
-            const compositeKey = `${normName}|${normCompany}|${normRole}`;
+            // Composite Key: Name + Company (Robust enough)
+            const compositeKey = `${normName}|${normCompany}`;
 
             // Fuzzy search for existing identity
             let existingKey = null;
             for (const [key, existing] of mergedIdentities.entries()) {
-                const nameMatch = key.split('|')[0] === normName;
-                const companyMatch = normCompany && key.split('|')[1] === normCompany;
+                const [existingNormName, existingNormCompany] = key.split('|');
+
+                const nameMatch = existingNormName === normName;
+
+                // FUZZY COMPANY MATCH: 
+                // Matches if exact, or if one is a substantial substring of the other (min 3 chars)
+                const companyMatch = (normCompany && existingNormCompany) &&
+                    (existingNormCompany.includes(normCompany) || normCompany.includes(existingNormCompany)) &&
+                    (normCompany.length >= 3 || existingNormCompany.length >= 3);
 
                 const candidateEmails = candidate.email ? [candidate.email] : (candidate.emails || []);
                 const candidatePhones = candidate.phoneNumbers || (candidate.phone ? [candidate.phone] : []);
@@ -532,7 +542,9 @@ router.post("/identify", async (req, res) => {
                 const sharedEmail = candidateEmails.some(e => existing.emails.includes(e));
                 const sharedPhone = candidatePhones.some(p => existing.phoneNumbers.includes(p));
 
-                if (key === compositeKey || (nameMatch && (sharedEmail || sharedPhone || companyMatch))) {
+                // Merge if:
+                // 1. Name matches AND (Company matches OR Shared Contacts)
+                if (nameMatch && (companyMatch || sharedEmail || sharedPhone)) {
                     existingKey = key;
                     break;
                 }
@@ -554,21 +566,26 @@ router.post("/identify", async (req, res) => {
                     existing.location = candidate.location || existing.location;
                     existing.source = "local";
                 }
-                if (candidate.phoneNumbers) candidate.phoneNumbers.forEach(p => {
-                    if (!existing.phoneNumbers.includes(p)) existing.phoneNumbers.push(p);
-                });
-                if (candidate.phone && !existing.phoneNumbers.includes(candidate.phone)) existing.phoneNumbers.push(candidate.phone);
-                if (candidate.email && !existing.emails.includes(candidate.email)) existing.emails.push(candidate.email);
-                if (candidate.emails) candidate.emails.forEach(e => {
-                    if (!existing.emails.includes(e)) existing.emails.push(e);
-                });
+
+                // Merge identifiers
+                existing.phoneNumbers = [...new Set([...(existing.phoneNumbers || []), ...(candidate.phoneNumbers || []), ...(candidate.phone ? [candidate.phone] : [])])];
+                existing.emails = [...new Set([...(existing.emails || []), ...(candidate.emails || []), ...(candidate.email ? [candidate.email] : [])])];
+
+                // Aggregate socials/URLs correctly
+                if (!existing.socials) existing.socials = [];
+                if (candidate.socials) {
+                    candidate.socials.forEach(s => {
+                        if (!existing.socials.find(es => es.url === s.url)) {
+                            existing.socials.push(s);
+                        }
+                    });
+                }
+                if (candidate.url && !existing.socials.find(s => s.url === candidate.url)) {
+                    existing.socials.push({ platform: "Web", url: candidate.url });
+                }
+
                 if (candidate.source && !existing.otherSources.includes(candidate.source)) {
                     existing.otherSources.push(candidate.source);
-                }
-                if (candidate.source === "internet" && candidate.url) {
-                    if (!existing.socials.some(s => s.url === candidate.url)) {
-                        existing.socials.push({ platform: 'Web', url: candidate.url });
-                    }
                 }
             }
         });
@@ -783,6 +800,7 @@ router.post("/deep", async (req, res) => {
         // This ensures that if the user clicks a card with a link, it shows up in the dashboard
         if (person.socials && Array.isArray(person.socials)) {
             person.socials.forEach(s => {
+                if (!s.url) return;
                 const normUrl = s.url.split('?')[0].replace(/\/$/, '').toLowerCase();
                 if (!socialProfiles.some(sp => sp.url.split('?')[0].replace(/\/$/, '').toLowerCase() === normUrl)) {
                     socialProfiles.push({
@@ -885,15 +903,31 @@ router.post("/deep", async (req, res) => {
         if (identityAnchor && verificationList.length > 0) {
             console.log(`[Deep Search] Starting Layer 2: Face Similarity Filtering for ${verificationList.length} images...`);
             const verificationPromises = verificationList.map(async (img) => {
-                if (img.url === identityAnchor) return { ...img, similarity: 100 };
-                const similarity = await verifyFaceSimilarity(identityAnchor, img.url);
-                return { ...img, similarity };
+                try {
+                    const currentUrl = img.url || img.imageUrl;
+                    if (currentUrl === identityAnchor) return { ...img, similarity: 100 };
+
+                    // LAYER 2: Face Similarity Gate
+                    const similarity = await verifyFaceSimilarity(identityAnchor, currentUrl);
+
+                    // CRITICAL: Block if similarity is below threshold
+                    if (similarity < 80) {
+                        console.log(`[DeepSearch] Blocking non-matching face: ${currentUrl} (Score: ${similarity})`);
+                        return { ...img, isBlocked: true, similarity };
+                    } else {
+                        return { ...img, similarity, isBlocked: false };
+                    }
+                } catch (err) {
+                    console.error(`[DeepSearch] Image verification failed for ${img.url}:`, err.message);
+                    return { ...img, isBlocked: true, similarity: 0 };
+                }
             });
 
             const verifiedImages = await Promise.all(verificationPromises);
             verifiedImages.forEach(img => {
-                if (img.similarity >= 80 && !seenUrls.has(img.url)) {
-                    seenUrls.add(img.url);
+                const url = img.url || img.imageUrl;
+                if (!img.isBlocked && url && !seenUrls.has(url)) {
+                    seenUrls.add(url);
                     finalGallery.push(img);
                 }
             });

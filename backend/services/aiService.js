@@ -36,7 +36,8 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       OUTPUT JSON ARRAY:
       [
         {
-          "name": "Name - Keyword",
+          "name": "Full Name",
+          "company": "Company Name or 'Unknown'",
           "description": "Brief summary of who they are (max 15 words).",
           "location": "City/Region if found, else 'Unknown'",
           "confidence": "high",

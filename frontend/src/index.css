@@ -1690,11 +1690,7 @@ body {
   }
 
   .trust-indicators {
-    flex-direction: column;
-    gap: 0.75rem;
-    align-items: center;
-    padding-left: 0;
-    margin-top: 1rem;
+    display: none;
   }
 
   .candidates-grid {
@@ -1857,12 +1853,7 @@ body {
   }
 
   .trust-indicators {
-    display: flex;
-    justify-content: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-    margin-top: 0;
-    padding-bottom: 0;
+    display: none;
   }
 
   .indicator {

@@ -70,11 +70,25 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
 }
 
 async function fetchImageAsBase64(url) {
+    if (!url) return null;
+
+    // Handle data URLs
+    if (url.startsWith('data:')) {
+        const parts = url.split(',');
+        return parts.length > 1 ? parts[1] : null;
+    }
+
     try {
-        const response = await axios.get(url, { responseType: 'arraybuffer' });
+        const response = await axios.get(url, {
+            responseType: 'arraybuffer',
+            timeout: 8000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+        });
         return Buffer.from(response.data, 'binary').toString('base64');
     } catch (err) {
-        console.error(`[FaceVerification] Failed to fetch image: ${url}`);
+        console.error(`[FaceVerification] Failed to fetch image: ${url.substring(0, 50)}... - ${err.message}`);
         return null;
     }
 }
