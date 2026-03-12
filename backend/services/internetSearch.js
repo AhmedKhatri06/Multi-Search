@@ -3,6 +3,81 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+/**
+ * Execute multiple dork queries via Serper and aggregate unique results.
+ * Each dork is a separate API call; results are merged and deduplicated by URL.
+ * 
+ * @param {string[]} dorks - Array of Google Dork query strings
+ * @param {number} [numPerQuery=10] - Number of results per query
+ * @returns {Object[]} Deduplicated search results
+ */
+export async function searchWithDorks(dorks, numPerQuery = 10) {
+    if (!dorks || dorks.length === 0) return [];
+
+    const apiKey = process.env.SERPER_API_KEY;
+    if (!apiKey) {
+        console.error('[Dorking] SERPER_API_KEY not configured');
+        return [];
+    }
+
+    console.log(`[Dorking] Executing ${dorks.length} dork queries...`);
+
+    const promises = dorks.map(async (dork, index) => {
+        try {
+            console.log(`  [Dork ${index + 1}] ${dork.slice(0, 80)}...`);
+            const response = await axios.post('https://google.serper.dev/search', {
+                q: dork,
+                num: numPerQuery
+            }, {
+                headers: {
+                    'X-API-KEY': apiKey,
+                    'Content-Type': 'application/json'
+                },
+                timeout: 15000
+            });
+
+            const results = response.data?.organic || [];
+            console.log(`  [Dork ${index + 1}] Got ${results.length} results`);
+
+            return results.map((item, i) => ({
+                id: `dork-${index}-${i}`,
+                title: item.title || 'Untitled',
+                text: item.snippet || '',
+                snippet: item.snippet || '',
+                url: item.link || '',
+                link: item.link || '',
+                source: 'Internet',
+                provider: 'Google Dork',
+                type: 'AUX',
+                priority: 3,
+                images: item.imageUrl ? [item.imageUrl] : [],
+                dorkQuery: dork
+            }));
+        } catch (err) {
+            console.error(`  [Dork ${index + 1}] Failed: ${err.message}`);
+            return [];
+        }
+    });
+
+    const allResults = await Promise.all(promises);
+
+    // Deduplicate by URL
+    const seenUrls = new Map();
+    for (const results of allResults) {
+        for (const item of results) {
+            const normalizedUrl = (item.url || '').split('?')[0].replace(/\/$/, '').toLowerCase();
+            if (normalizedUrl && !seenUrls.has(normalizedUrl)) {
+                seenUrls.set(normalizedUrl, item);
+            }
+        }
+    }
+
+    const deduped = Array.from(seenUrls.values());
+    console.log(`[Dorking] Total unique results: ${deduped.length}`);
+    return deduped;
+}
+
+
 export async function searchInternet(query) {
     try {
         const data = JSON.stringify({

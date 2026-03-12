@@ -136,3 +136,72 @@ export const generateText = async (prompt) => {
         return ""; // Return empty string to allow UI to render without summary
     }
 };
+
+/**
+ * Verifies if a search result belongs to the target person based on context.
+ * @param {Object} params
+ * @param {string} params.targetName - Full name of the person being searched
+ * @param {string} params.targetContext - Biography, company, or role of the searched person
+ * @param {Object} params.candidate - The search result to verify (title, snippet, url)
+ * @returns {Promise<Object>} Verification result { isMatch: boolean, score: number, reasoning: string }
+ */
+export const verifyIdentityMatch = async ({ targetName, targetContext, candidate }) => {
+    if (!process.env.GROQ_API_KEY) return { isMatch: true, score: 100, reasoning: "AI Key missing" };
+
+    const systemPrompt = `
+      You are a specialized Identity Verification System.
+      Your goal is to determine if a search result (Candidate) refers to the specific individual (Target).
+      
+      MATCH CRITERIA:
+      - Name similarity (accounting for middle names or abbreviations).
+      - Career/Professional alignment (Current/past company, role, industry).
+      - Education/University matching.
+      - Location consistency (only if specified in both).
+      
+      OUTPUT FORMAT (JSON ONLY):
+      {
+        "isMatch": boolean,
+        "score": number (0-100),
+        "reasoning": "1 sentence explanation"
+      }
+    `;
+
+    const prompt = `
+      TARGET PERSON:
+      Name: ${targetName}
+      Context: ${targetContext}
+
+      CANDIDATE RESULT:
+      Title: ${candidate.title}
+      Snippet: ${candidate.snippet || candidate.text}
+      URL: ${candidate.url || candidate.link}
+    `;
+
+    try {
+        const chatCompletion = await groq.chat.completions.create({
+            messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: prompt }
+            ],
+            model: "llama-3.1-8b-instant",
+            temperature: 0.1, // Low temperature for consistency
+        });
+
+        let text = chatCompletion.choices[0]?.message?.content?.trim() || "";
+
+        // Safety check for common AI formatting
+        if (text.startsWith("```")) {
+            text = text.replace(/```(json)?/g, "").replace(/```/g, "").trim();
+        }
+
+        const jsonMatch = text.match(/\{.*\}/s);
+
+        if (jsonMatch) {
+            return JSON.parse(jsonMatch[0]);
+        }
+        return { isMatch: true, score: 50, reasoning: "Failed to parse AI response" };
+    } catch (error) {
+        console.error("verifyIdentityMatch Error:", error.message);
+        return { isMatch: true, score: 50, reasoning: "API Error: " + error.message };
+    }
+};

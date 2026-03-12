@@ -5,13 +5,14 @@ import FormInfo from "../models/FormInfo.js";
 import SearchCache from "../models/SearchCache.js";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
-import { identifyPeople, generateText } from "../services/aiService.js";
+import { identifyPeople, generateText, verifyIdentityMatch } from "../services/aiService.js";
 import { extractSocialAccounts } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName } from "../utils/searchHelper.js";
 import { searchCSVs } from "../services/csvSearchService.js";
-import { searchImages, calculateImageScore } from "../services/internetSearch.js";
+import { searchImages, calculateImageScore, searchWithDorks } from "../services/internetSearch.js";
 import { verifyFaceSimilarity, detectHumanFace } from "../services/faceVerificationService.js";
+import { generateDorks, generatePivotDorks, generateDocumentDorks } from "../services/dorkingService.js";
 
 dotenv.config();
 
@@ -789,15 +790,39 @@ router.post("/deep", async (req, res) => {
         const imageQuery = `"${name}" ${cleanProfession} "profile picture" OR "portrait"`.trim();
         const fallbackImageQuery = `"${name}" ${cleanProfession} headshot`.trim();
 
-        // EXECUTION: Perform both strict and broad sweeps in parallel (Serper is fast)
-        // EXECUTION: Perform sweeps with optimized query volume
-        const [socialStrict, socialBroad, contextBroad, initialImageResults, wikiResult] = await Promise.all([
+        // EXECUTION: Perform sweeps + Tier 1 Dorking in parallel
+        const dorkParams = { name, keywords: keyword, location: cleanLocation };
+        const { tier1: tier1Dorks } = generateDorks(dorkParams);
+        console.log(`[Deep Search] Generated ${tier1Dorks.length} Tier 1 dork queries`);
+
+        const [
+            socialStrict,
+            socialBroad,
+            contextBroad,
+            initialImageResults,
+            wikiResult,
+            dorkResults,
+            docResults
+        ] = await Promise.all([
             performSearch(socialQueryStrict, true).catch(() => []),
             performSearch(socialQueryBroad, true).catch(() => []),
             performSearch(contextQueryBroad, true).catch(() => []),
             searchImages(imageQuery, name, contextKeywordsList).catch(() => []),
-            searchWikipedia(name).catch(() => null)
+            searchWikipedia(name).catch(() => null),
+            searchWithDorks(tier1Dorks, 10).catch(() => []),
+            searchWithDorks(generateDocumentDorks(dorkParams), 10).catch(() => [])
         ]);
+
+        // Process External Documents
+        const externalDocuments = (docResults || []).map(doc => ({
+            title: doc.title || "Untitled Document",
+            snippet: doc.snippet || doc.text || "No description available",
+            url: doc.url || doc.link,
+            platform: doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' :
+                (doc.url?.toLowerCase().includes('.doc') ? 'DOCX' :
+                    (doc.url?.toLowerCase().includes('.ppt') ? 'PPT' : 'Document')),
+            timestamp: new Date().toISOString()
+        }));
 
         // Merge and deduplicate results, favoring strict matches
         const socialResults = [...socialStrict];
@@ -813,7 +838,8 @@ router.post("/deep", async (req, res) => {
             finalImageResults = await searchImages(fallbackImageQuery, name, contextKeywordsList);
         }
 
-        const allSearchItems = [...socialResults, ...contextResults];
+        const allSearchItems = [...socialResults, ...contextResults, ...dorkResults];
+        console.log(`[Deep Search] Total search items (incl. dorks): ${allSearchItems.length}`);
 
         // 3. Robust Social Discovery using specialized service with anchors
         const queryWords = name.split(' ');
@@ -844,8 +870,89 @@ router.post("/deep", async (req, res) => {
             }
         }
 
-        console.log(`[Deep Search] Social profiles found: ${socialProfiles.length} `);
+        console.log(`[Deep Search] Social profiles found (Phase 1): ${socialProfiles.length} `);
+
+        // --- PHASE 2: RECURSIVE HANDLE PIVOT ---
+        // Identify a "Core Identity" to extract a handle for cross-platform matching
+        const coreProfile = socialProfiles.find(s =>
+            (s.platform.toLowerCase() === 'linkedin' || s.platform.toLowerCase() === 'github') &&
+            s.identityScore >= 70
+        );
+
+        if (coreProfile && coreProfile.username) {
+            console.log(`[Deep Search] Core Identity found: ${coreProfile.platform} (${coreProfile.username}). Launching Pivot Sweep...`);
+            const pivotDorks = generatePivotDorks(name, coreProfile.username);
+
+            try {
+                const pivotResults = await searchWithDorks(pivotDorks, 10);
+                if (pivotResults.length > 0) {
+                    console.log(`[Deep Search] Pivot sweep found ${pivotResults.length} new potential matches for handle: ${coreProfile.username}`);
+
+                    // Run second pass of discovery with knownHandle anchor
+                    const phase2Profiles = extractSocialAccounts(pivotResults, name, queryWords, cleanLocation, targetEmails, targetPhones, {
+                        knownHandle: coreProfile.username
+                    });
+
+                    // Merge and deduplicate
+                    phase2Profiles.forEach(p2 => {
+                        const exists = socialProfiles.some(p1 =>
+                            p1.platform.toLowerCase() === p2.platform.toLowerCase() ||
+                            p1.url.toLowerCase() === p2.url.toLowerCase()
+                        );
+                        if (!exists) {
+                            console.log(`  [Pivot Success] Found ${p2.platform} via handle correlation`);
+                            socialProfiles.push(p2);
+                        }
+                    });
+                }
+            } catch (pivotErr) {
+                console.error(`[Deep Search] Pivot sweep failed: ${pivotErr.message}`);
+            }
+        }
+
         socialProfiles.forEach(s => console.log(`  → ${s.platform}: ${s.username} (${s.url})[score: ${s.identityScore}]`));
+
+        // --- PHASE 3: SEMANTIC IDENTITY VERIFICATION (AI Refinement) ---
+        // Only run for profiles with score < 90 to save API costs
+        const targetContext = `${person.description || ''} ${cleanProfession || ''} ${cleanLocation || ''}`.trim();
+        console.log(`[Deep Search] Starting AI Refinement for ${socialProfiles.length} profiles...`);
+
+        const refinementPromises = socialProfiles.map(async (profile) => {
+            // Skip 100-score (anchor/local) profiles
+            if (profile.identityScore >= 95) return profile;
+
+            try {
+                const verification = await verifyIdentityMatch({
+                    targetName: name,
+                    targetContext: targetContext,
+                    candidate: {
+                        title: profile.title || profile.name || profile.username,
+                        snippet: profile.bio || profile.description,
+                        url: profile.url
+                    }
+                });
+
+                if (!verification.isMatch && verification.score < 30) {
+                    console.log(`  [AI Reject] ${profile.platform}: ${verification.reasoning} (${profile.url})`);
+                    return null;
+                }
+
+                // Boost score if AI confirms match
+                if (verification.isMatch && verification.score > 80) {
+                    profile.identityScore = Math.min(100, profile.identityScore + 15);
+                    profile.aiVerified = true;
+                }
+
+                return profile;
+            } catch (err) {
+                console.error(`  [AI Error] Failed to verify ${profile.platform}: ${err.message}`);
+                return profile; // Fallback to keep if error
+            }
+        });
+
+        const refinedProfiles = (await Promise.all(refinementPromises)).filter(p => p !== null);
+        socialProfiles = refinedProfiles;
+        console.log(`[Deep Search] AI Refinement complete. Final profiles: ${socialProfiles.length}`);
 
         // --- Layer 1: Anchor Selection (Highest Confidence Image) ---
         let identityAnchor = null;
@@ -1045,8 +1152,7 @@ router.post("/deep", async (req, res) => {
             person: {
                 ...person,
                 name,
-                primaryImage: primaryImageObj ? (primaryImageObj.isBlocked ? primaryImageObj.thumbnail : primaryImageObj.original) : "",
-                primaryImageObj: primaryImageObj,
+                primaryImage: (finalImages[0])?.original || "",
                 phoneNumbers: [...new Set([...localPhones, ...webPhones])],
                 emails: [...new Set([...localEmails, ...webEmails])],
                 aiSummary: aiSummary
@@ -1054,7 +1160,8 @@ router.post("/deep", async (req, res) => {
             localData: localResults,
             socials: socialProfiles,
             images: finalImages,
-            articles: articles
+            articles: articles,
+            externalDocuments: externalDocuments || []
         });
     } catch (err) {
         console.error("Deep search failed:", err);

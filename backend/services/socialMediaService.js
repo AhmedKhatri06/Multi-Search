@@ -5,7 +5,14 @@ const platformPriority = {
     'twitter': 3,
     'x': 3,
     'instagram': 4,
-    'facebook': 5
+    'facebook': 5,
+    'crunchbase': 6,
+    'medium': 7,
+    'stackoverflow': 8,
+    'behance': 9,
+    'dribbble': 10,
+    'linktree': 11,
+    'aboutme': 12
 };
 
 const profilePatterns = {
@@ -17,23 +24,52 @@ const profilePatterns = {
     // Twitter/X profiles
     twitter: /^https?:\/\/(www\.)?(twitter|x)\.com\/[a-zA-Z0-9_]+\/?(\?.*)?$/,
     // Facebook profiles/pages (support query params)
-    facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/
+    facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/,
+    crunchbase: /^https?:\/\/(www\.)?crunchbase\.com\/person\/[a-zA-Z0-9_-]+\/?$/,
+    medium: /^https?:\/\/(www\.)?medium\.com\/@?[a-zA-Z0-9._-]+\/?$/,
+    stackoverflow: /^https?:\/\/stackoverflow\.com\/users\/\d+\/[a-zA-Z0-9._-]+\/?$/,
+    behance: /^https?:\/\/(www\.)?behance\.net\/[a-zA-Z0-9._-]+\/?$/,
+    dribbble: /^https?:\/\/(www\.)?dribbble\.com\/[a-zA-Z0-9._-]+\/?$/,
+    linktree: /^https?:\/\/(www\.)?linktr\.ee\/[a-zA-Z0-9._-]+\/?$/,
+    aboutme: /^https?:\/\/(www\.)?about\.me\/[a-zA-Z0-9._-]+\/?$/
 };
 
 const disqualifyingPatterns = [
-    'posted', 'shared', 'mentioned', 'tagged', 'commented', 'liked',
-    'reposted', 'retweeted', 'photo by', 'video by', 'post by',
-    'see photos', 'view profile of people named', 'search results',
+    'view profile of people named', 'search results',
     '/p/', '/posts/', '/status/', '/photos/', '/videos/', '/reel/', '/stories/',
     '/groups/', '/marketplace/', '/watch/', '/search/', '/events/'
 ];
 
-function calculateIdentityScore(result, personName, keywords = [], location = '', targetEmails = [], targetPhones = []) {
+// Heuristic noise patterns ubiquitous in social snippets
+const socialNoisePatterns = [
+    'see photos and videos', 'followers', 'following', 'posts', 'photo by', 'video by',
+    'instagram photos and videos', 'on instagram', 'check out', 'shared a', 'reposted',
+    'mentioned you', 'tagged', 'commented', 'liked'
+];
+
+/**
+ * Heuristic Cleaning: Strips platform-specific UI boilerplate from snippets
+ * before analysis. This prevents accidental rejection of valid social profiles.
+ */
+function cleanSnippet(text) {
+    let cleaned = text.toLowerCase();
+    socialNoisePatterns.forEach(pattern => {
+        cleaned = cleaned.replace(new RegExp(pattern, 'gi'), '');
+    });
+    return cleaned.trim();
+}
+
+function calculateIdentityScore(result, personName, options = {}) {
+    const { keywords = [], location = '', targetEmails = [], targetPhones = [], knownHandle = '', platform = '' } = options;
+
     let score = 0;
     const title = (result.title || '').toLowerCase();
-    const snippet = (result.snippet || result.text || '').toLowerCase();
+    const rawSnippet = (result.snippet || result.text || '').toLowerCase();
     const link = (result.url || result.link || '').toLowerCase();
-    const combinedText = `${title} ${snippet}`.toLowerCase();
+
+    // 0. Heuristic Cleanup
+    const cleanedSnippet = cleanSnippet(rawSnippet);
+    const combinedText = `${title} ${cleanedSnippet}`.toLowerCase();
 
     // ID ANCHORING: If we find a known email or phone, it's a guaranteed match (+100)
     const hasEmailMatch = targetEmails.some(email =>
@@ -45,36 +81,41 @@ function calculateIdentityScore(result, personName, keywords = [], location = ''
     });
 
     if (hasEmailMatch || hasPhoneMatch) {
-        console.log(`    [Identity Anchor] MATCH FOUND: ${hasEmailMatch ? 'Email' : 'Phone'} -> ${link}`);
         return 100;
     }
 
-    // 1. Strict Name Matching (0-40 points)
-    // We require at least TWO name parts to match for any non-anchored social profile
+    // HANDLE CORRELATION: Massive boost (+40) if handle matches a known verified identity
+    if (knownHandle && link.toLowerCase().includes(knownHandle.toLowerCase())) {
+        console.log(`    [Handle Pivot] MATCH: ${knownHandle} -> ${link}`);
+        score += 40;
+    }
+
+    // 1. Adaptive Name Matching (0-40 points)
     const nameParts = personName.toLowerCase().split(/\s+/).filter(p => p.length > 2);
-    if (nameParts.length < 2) return 0; // Prevent collisions on single common names
+    if (nameParts.length < 1) return 0;
 
     let nameMatches = 0;
     nameParts.forEach(part => {
         if (title.includes(part) || link.includes(part)) nameMatches++;
     });
 
-    if (nameMatches < 2) return 0; // Reject if only one name part matches (e.g., "Mihir" matches but not "Doshi")
+    // REJECTION LOGIC: 
+    // - Professional sites (LinkedIn/Crunchbase) REQUIRE at least 2 name parts or handle match.
+    // - Social sites (IG/X) allow 1 name part if it's a specific match or handle exists.
+    const isProfessional = ['linkedin', 'crunchbase'].includes(platform);
+    if (isProfessional && nameMatches < 2 && !knownHandle) return 0;
+    if (!isProfessional && nameMatches < 1) return 0;
+
     score += (nameMatches / nameParts.length) * 40;
 
-    // 2. Company/Identity Core Match (0-50 points) - CRITICAL for Bug 3
-    // Enforce matching for Company + Designation if markers are provided
+    // 2. Company/Identity Core Match (0-50 points)
     if (keywords && keywords.length > 0) {
         let keywordMatches = 0;
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
 
-        // Split markers into high-weight (Company) and medium-weight (Designation) if possible
         kwList.forEach(kw => {
             const lowerKw = kw.toLowerCase().trim();
-            if (combinedText.includes(lowerKw)) {
-                // Massive boost if company name matches perfectly in a social bio
-                keywordMatches += 2;
-            }
+            if (combinedText.includes(lowerKw)) keywordMatches += 2;
         });
 
         score += Math.min(keywordMatches * 25, 50);
@@ -85,18 +126,23 @@ function calculateIdentityScore(result, personName, keywords = [], location = ''
         score += 10;
     }
 
-    // 4. Business Page Penalty - CRITICAL for Bug 3 (The Commerce Team Global)
+    // 4. Penalty System (instead of hard disqualification for some terms)
+    // Low-weight markers that imply it MIGHT be a post rather than a profile
+    const softDisqualifiers = ['posted', 'shared', 'mentioned', 'reposted', 'tweeted'];
+    softDisqualifiers.forEach(term => {
+        if (rawSnippet.toLowerCase().includes(term)) score -= 15;
+    });
+
+    // 5. Business Page Penalty
     const businessPatterns = ["global", "solutions", "team", "services", "corporate", "agency", "consulting"];
     const isLikelyBusiness = businessPatterns.some(p => link.includes(p) || title.includes(p));
-
-    // Check if the title looks like a person's name or a company name
     const titleIsPersonal = title.includes(personName.toLowerCase());
 
     if (isLikelyBusiness && !titleIsPersonal && !combinedText.includes("founder") && !combinedText.includes("ceo")) {
-        score -= 60; // Heavier penalty to ensure business pages are disqualified
+        score -= 60;
     }
 
-    return Math.round(score);
+    return Math.max(0, Math.round(score));
 }
 
 function containsDisqualifyingPattern(result) {
@@ -114,7 +160,7 @@ function isValidProfileUrl(url, platform) {
     return pattern.test(url);
 }
 
-export function extractSocialAccounts(internetResults, personName, keywords = [], location = '', targetEmails = [], targetPhones = []) {
+export function extractSocialAccounts(internetResults, personName, keywords = [], location = '', targetEmails = [], targetPhones = [], options = {}) {
     const socialAccounts = [];
     const seenUrls = new Set();
 
@@ -132,6 +178,13 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         else if (link.includes('twitter.com') || link.includes('x.com')) platform = 'twitter';
         else if (link.includes('instagram.com')) platform = 'instagram';
         else if (link.includes('facebook.com')) platform = 'facebook';
+        else if (link.includes('crunchbase.com/person/')) platform = 'crunchbase';
+        else if (link.includes('medium.com')) platform = 'medium';
+        else if (link.includes('stackoverflow.com/users/')) platform = 'stackoverflow';
+        else if (link.includes('behance.net')) platform = 'behance';
+        else if (link.includes('dribbble.com')) platform = 'dribbble';
+        else if (link.includes('linktr.ee')) platform = 'linktree';
+        else if (link.includes('about.me')) platform = 'aboutme';
 
         if (!platform) return;
 
@@ -148,11 +201,17 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
             return;
         }
 
-        // Calculate identity score with anchoring support
-        const identityScore = calculateIdentityScore(result, personName, keywords, location, targetEmails, targetPhones);
+        // Calculate identity score with anchoring and handle pivot support
+        const identityScore = calculateIdentityScore(result, personName, {
+            keywords,
+            location,
+            targetEmails,
+            targetPhones,
+            knownHandle: options.knownHandle || '',
+            platform
+        });
 
         // Reject low confidence matches
-        // SOFTENED: Lowered to 10 for better recall, relying on deduplication for accuracy
         if (identityScore < 10) {
             console.log(`  [Skip] ${platform}: Score too low (${identityScore}) -> ${link}`);
             return;

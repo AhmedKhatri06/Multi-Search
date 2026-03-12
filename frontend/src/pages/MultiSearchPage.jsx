@@ -18,6 +18,13 @@ const getPlatformEmoji = (platform) => {
     if (p.includes('facebook')) return '👥';
     if (p.includes('wikipedia')) return '📚';
     if (p.includes('britannica')) return '🏛️';
+    if (p.includes('crunchbase')) return '🏢';
+    if (p.includes('medium')) return '📝';
+    if (p.includes('stack')) return '🏗️';
+    if (p.includes('behance')) return '🎨';
+    if (p.includes('dribbble')) return '🏀';
+    if (p.includes('linktr')) return '🌳';
+    if (p.includes('aboutme')) return '👤';
     return '🔗';
 };
 
@@ -798,10 +805,17 @@ const MultiSearchPage = () => {
                                 <input
                                     className="hero-search-input"
                                     type={searchMode === SEARCH_MODES.PHONE ? "tel" : "text"}
-                                    inputMode={searchMode === SEARCH_MODES.PHONE ? "tel" : "text"}
+                                    inputMode={searchMode === SEARCH_MODES.PHONE ? "numeric" : "text"}
+                                    pattern={searchMode === SEARCH_MODES.PHONE ? "[0-9]*" : undefined}
                                     placeholder={searchMode === SEARCH_MODES.PHONE ? "Enter mobile number..." : "Enter name, email, or digital identity..."}
                                     value={query}
-                                    onChange={(e) => setQuery(e.target.value)}
+                                    onChange={(e) => {
+                                        if (searchMode === SEARCH_MODES.PHONE) {
+                                            setQuery(e.target.value.replace(/\D/g, ''));
+                                        } else {
+                                            setQuery(e.target.value);
+                                        }
+                                    }}
                                     onKeyDown={(e) => e.key === 'Enter' && handleIdentify()}
                                     autoFocus
                                 />
@@ -1125,6 +1139,36 @@ const MultiSearchPage = () => {
                                 </div>
                             )}
 
+                            {/* External Documents & Evidence */}
+                            {deepData.externalDocuments && deepData.externalDocuments.length > 0 && (
+                                <div className="category-section animate-fade-up">
+                                    <div className="category-header">
+                                        <h3 className="category-title">📄 External Documents & Evidence</h3>
+                                        <span className="category-count">{deepData.externalDocuments.length} Findings</span>
+                                    </div>
+                                    <div className="social-grid">
+                                        {deepData.externalDocuments.map((doc, i) => (
+                                            <div key={i} className="saas-card animate-scale-in" style={{ cursor: 'pointer' }} onClick={() => window.open(doc.url, '_blank')}>
+                                                <div className="card-icon">
+                                                    {doc.platform === 'PDF' ? '📝' :
+                                                        doc.platform === 'DOCX' ? '📄' :
+                                                            doc.platform === 'PPT' ? '📊' : '📁'}
+                                                </div>
+                                                <div className="card-body">
+                                                    <div className="card-meta">{doc.platform} Document</div>
+                                                    <div className="card-title" style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                                        {doc.title || 'View Source'}
+                                                    </div>
+                                                    <div style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.4)', marginTop: '4px' }}>
+                                                        {doc.snippet.substring(0, 40)}...
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Internal Archive */}
                             {deepData.localData && deepData.localData.length > 0 && (
                                 <div className="category-section animate-fade-up">
@@ -1266,9 +1310,12 @@ const MultiSearchPage = () => {
                                     <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NUMBER (LOCAL ONLY)</label>
                                     <input
                                         className="hero-search-input"
+                                        type="tel"
+                                        inputMode="numeric"
+                                        pattern="[0-9]*"
                                         style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
                                         value={feedbackData.number}
-                                        onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value })}
+                                        onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value.replace(/\D/g, '') })}
                                         placeholder="e.g. 91xxxxxxxxxx"
                                     />
                                 </div>

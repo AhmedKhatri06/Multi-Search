@@ -459,10 +459,12 @@ function NexaSearchPage() {
                             onChange={(e) => setRefinementData({ ...refinementData, location: e.target.value })}
                         />
                         <input
-                            type="text"
+                            type="tel"
+                            inputMode="numeric"
+                            pattern="[0-9]*"
                             placeholder="Phone Number (optional)"
                             value={refinementData.number}
-                            onChange={(e) => setRefinementData({ ...refinementData, number: e.target.value })}
+                            onChange={(e) => setRefinementData({ ...refinementData, number: e.target.value.replace(/\D/g, '') })}
                         />
                         <div className="nexa-form-buttons">
                             <button type="submit" className="nexa-submit-btn">Search</button>
