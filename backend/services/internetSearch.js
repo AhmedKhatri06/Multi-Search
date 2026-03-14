@@ -126,19 +126,31 @@ export function calculateImageScore(item, targetName = "", contextKeywords = [])
     // 1. Strict Name Match Scoring (Check title, source URL, and filename)
     if (targetName) {
         const nameParts = targetLower.split(/\s+/).filter(p => p.length > 2);
-        if (nameParts.length < 2) return -100; // Reject if name is too short/ambiguous
-
         const matches = nameParts.filter(part => {
             const regex = new RegExp(`\\b${part}\\b`, 'i');
             return regex.test(title) || link.includes(part) || imageUrl.includes(part);
         }).length;
 
-        if (matches === nameParts.length) {
+        // Standard name scoring
+        if (matches === nameParts.length && nameParts.length > 0) {
             score += 60; // Perfect name match
-        } else if (matches >= 1) {
-            score += (matches / nameParts.length) * 40;
+        } else if (matches >= 2) {
+            score += 40; // High confidence
+        } else if (matches === 1) {
+            score += 20; // Some evidence
         } else {
-            return -100; // IDENTITY BOUND: If NO name parts match, it's NOT our person.
+            score -= 40;
+        }
+
+        // Contextual Fallback: If at least ONE name part matches AND context is strong, boost it
+        const markers = Array.isArray(contextKeywords) ? contextKeywords : [contextKeywords];
+        const contextMatches = markers.filter(keyword => {
+            if (!keyword || keyword.length < 3) return false;
+            return title.includes(keyword.toLowerCase()) || link.includes(keyword.toLowerCase());
+        }).length;
+
+        if (matches >= 1 && contextMatches >= 1) {
+            score += 30; // Boost contextual matches for confirmed names
         }
     }
 
@@ -157,7 +169,10 @@ export function calculateImageScore(item, targetName = "", contextKeywords = [])
 
     // 3. Platform Trust & Identity Indicators
     if (link.includes("linkedin.com/in/")) score += 40;
+    else if (link.includes("github.com") || link.includes("stackoverflow.com")) score += 30;
     else if (link.includes("instagram.com") || link.includes("facebook.com")) score += 20;
+    else if (link.includes("twitter.com") || link.includes("x.com")) score += 20;
+    else if (link.includes("t.me") || link.includes("tiktok.com") || link.includes("pinterest.com") || link.includes("youtube.com") || link.includes("reddit.com")) score += 15;
 
     // 4. Aspect Ratio (Profile Portrait focus)
     const width = item.imageWidth || 0;
@@ -209,16 +224,10 @@ export async function searchImages(query, targetName = "", contextKeywords = [])
         }));
 
         // Filter and Sort by Confidence
-        // SOFTENED: Lowered threshold to 10 to allow more results in while still filtering junk
+        // SOFTENED: Lowered threshold to 5 to allow more results in for face verification to decide
         const filtered = scored
-            .filter(item => item.score >= 10)
+            .filter(item => item.score >= 5)
             .sort((a, b) => b.score - a.score);
-
-        // FALLBACK: Removed to avoid image pollution. Only high-confidence matches allowed.
-        if (filtered.length === 0 && results.length > 0) {
-            console.log(`[Image Discovery] No high-confidence identity matches for: ${targetName}. Returning empty gallery to prevent pollution.`);
-            return [];
-        }
 
         return filtered.map((item, index) => ({
             id: `image-${index}`,

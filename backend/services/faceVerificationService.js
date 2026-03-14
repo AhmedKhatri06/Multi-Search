@@ -29,7 +29,7 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
 
         if (!anchorData || !candidateData) return 0;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `
             Task: Compare the faces in these two images to determine if they are the same person.
@@ -65,10 +65,12 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
             return data.isSamePerson ? data.confidence : 0;
         }
 
-        return 0;
+        console.warn("[FaceVerification] Could not parse AI response. Falling back to 'Probable'.");
+        return 55; // Probable match if response is unreadable
     } catch (error) {
         console.error("[FaceVerification] Error:", error.message);
-        return 0;
+        // Fallback for network/fetch/API failures to prevent accidental image disappearance
+        return 55;
     }
 }
 
@@ -89,7 +91,7 @@ export async function detectHumanFace(imageUrl) {
         const imageData = await fetchImageAsBase64(imageUrl);
         if (!imageData) return false;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
         const prompt = `
             Task: Analyze this image and determine if it contains a clear, identifiable human face.
@@ -113,15 +115,17 @@ export async function detectHumanFace(imageUrl) {
         if (jsonMatch) {
             const data = JSON.parse(jsonMatch[0]);
             if (!data.hasHumanFace) {
-                console.log(`[FaceVerification] No human face detected in: ${imageUrl}`);
+                console.log(`[FaceVerification] AI explicitly found no face in: ${imageUrl}`);
             }
             return data.hasHumanFace && data.confidence > 70;
         }
 
-        return false;
+        console.warn("[FaceVerification] Could not parse face detection response. Falling back to true.");
+        return true;
     } catch (error) {
         console.error("[FaceVerification] Face detection error:", error.message);
-        return false;
+        // Fallback to true for network errors to prevent blocking valid images
+        return true;
     }
 }
 

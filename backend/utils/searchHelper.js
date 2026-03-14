@@ -67,7 +67,7 @@ export function normalizePhoneNumber(phone) {
  * @param {string} text 
  * @returns {{phones: string[], emails: string[]}}
  */
-export function extractContacts(text) {
+export function extractContacts(text, targetName = '') {
     if (!text) return { phones: [], emails: [] };
 
     // Regex for basic international and domestic phone formats
@@ -77,11 +77,59 @@ export function extractContacts(text) {
     const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
 
     const phones = (text.match(phoneRegex) || []).map(p => p.trim());
-    const emails = (text.match(emailRegex) || []).map(e => e.trim().toLowerCase());
+    const allEmails = (text.match(emailRegex) || []).map(e => e.trim().toLowerCase());
+
+    // If no target name provided, return all emails (backward compatible)
+    if (!targetName) {
+        return {
+            phones: [...new Set(phones)],
+            emails: [...new Set(allEmails)]
+        };
+    }
+
+    // PROXIMITY + HANDLE SIMILARITY FILTER
+    const nameParts = targetName.toLowerCase().split(/\s+/).filter(p => p.length > 1);
+    const firstInitial = nameParts[0]?.[0] || '';
+    const lastName = nameParts[nameParts.length - 1] || '';
+
+    const verifiedEmails = [];
+    const filteredEmails = [];
+
+    allEmails.forEach(email => {
+        const prefix = email.split('@')[0].toLowerCase().replace(/[._\-0-9]/g, '');
+
+        // Check 1: Does the email prefix contain parts of the target name?
+        const prefixMatchesName = nameParts.some(part => prefix.includes(part));
+        // Check 2: Does the prefix start with the first initial + last name pattern?
+        const prefixMatchesInitial = prefix.startsWith(firstInitial) && prefix.includes(lastName);
+        // Check 3: Does the prefix contain a DIFFERENT name entirely?
+        const looksLikeDifferentPerson = prefix.length > 3 && !prefixMatchesName && !prefixMatchesInitial;
+
+        // Check 4: Proximity — is the email near the person's name in the text?
+        let isProximate = false;
+        const emailIndex = text.toLowerCase().indexOf(email);
+        if (emailIndex >= 0) {
+            const surroundingText = text.substring(
+                Math.max(0, emailIndex - 200),
+                Math.min(text.length, emailIndex + 200)
+            ).toLowerCase();
+            isProximate = nameParts.some(p => surroundingText.includes(p));
+        }
+
+        if (prefixMatchesName || prefixMatchesInitial) {
+            verifiedEmails.push(email);
+        } else if (isProximate && !looksLikeDifferentPerson) {
+            verifiedEmails.push(email);
+        } else {
+            console.log(`[Contact Filter] Rejected email "${email}" for target "${targetName}" (prefix: "${prefix}", proximate: ${isProximate})`);
+            filteredEmails.push(email);
+        }
+    });
 
     return {
         phones: [...new Set(phones)],
-        emails: [...new Set(emails)]
+        emails: [...new Set(verifiedEmails)],
+        filteredEmails: [...new Set(filteredEmails)]
     };
 }
 

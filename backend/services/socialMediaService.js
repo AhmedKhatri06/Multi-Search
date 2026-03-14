@@ -6,28 +6,38 @@ const platformPriority = {
     'x': 3,
     'instagram': 4,
     'facebook': 5,
-    'crunchbase': 6,
-    'medium': 7,
-    'stackoverflow': 8,
-    'behance': 9,
-    'dribbble': 10,
-    'linktree': 11,
-    'aboutme': 12
+    'telegram': 6,
+    'tiktok': 7,
+    'pinterest': 8,
+    'youtube': 9,
+    'snapchat': 10,
+    'reddit': 11,
+    'crunchbase': 12,
+    'medium': 13,
+    'stackoverflow': 14,
+    'behance': 15,
+    'dribbble': 16,
+    'linktree': 17,
+    'aboutme': 18
 };
 
 const profilePatterns = {
     // Exact profile matches or with query params
     instagram: /^https?:\/\/(www\.)?instagram\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/,
-    // LinkedIn profiles - support regional subdomains (in.linkedin.com, uk.linkedin.com)
     linkedin: /^https?:\/\/([a-z]{2,3}\.)?linkedin\.com\/in\/[a-zA-Z0-9_-]+\/?(\?.*)?$/,
     github: /^https?:\/\/(www\.)?github\.com\/[a-zA-Z0-9_-]+\/?$/,
-    // Twitter/X profiles
     twitter: /^https?:\/\/(www\.)?(twitter|x)\.com\/[a-zA-Z0-9_]+\/?(\?.*)?$/,
-    // Facebook profiles/pages (support query params)
-    facebook: /^https?:\/\/(www\.)?facebook\.com\/[a-zA-Z0-9._-]+\/?(\?.*)?$/,
+    facebook: /^https?:\/\/(www\.)?facebook\.com\/(?!(policies|legal|help|groups|events|marketplace|watch|photo\.php|story\.php))[a-zA-Z0-9._-]+\/?(\?.*)?$/,
+    telegram: /^https?:\/\/t\.me\/[a-zA-Z0-9_]{5,}\/?$/,
+    tiktok: /^https?:\/\/(www\.)?tiktok\.com\/@[a-zA-Z0-9._-]+\/?$/,
+    pinterest: /^https?:\/\/(www\.)?pinterest\.(com|cl|co|ca|de|es|fr|it|jp|ru)\/[a-zA-Z0-9._-]+\/?$/,
+    youtube: /^https?:\/\/(www\.)?youtube\.com\/(c\/|user\/|@)[a-zA-Z0-9._-]+\/?$/,
+    snapchat: /^https?:\/\/(www\.)?snapchat\.com\/add\/[a-zA-Z0-9._-]+\/?$/,
+    reddit: /^https?:\/\/(www\.)?reddit\.com\/user\/[a-zA-Z0-9._-]+\/?$/,
     crunchbase: /^https?:\/\/(www\.)?crunchbase\.com\/person\/[a-zA-Z0-9_-]+\/?$/,
     medium: /^https?:\/\/(www\.)?medium\.com\/@?[a-zA-Z0-9._-]+\/?$/,
     stackoverflow: /^https?:\/\/stackoverflow\.com\/users\/\d+\/[a-zA-Z0-9._-]+\/?$/,
+    stackoverflow: /^https?:\/\/stackoverflow.com\/users\/\d+\/[a-zA-Z0-9._-]+\/?$/,
     behance: /^https?:\/\/(www\.)?behance\.net\/[a-zA-Z0-9._-]+\/?$/,
     dribbble: /^https?:\/\/(www\.)?dribbble\.com\/[a-zA-Z0-9._-]+\/?$/,
     linktree: /^https?:\/\/(www\.)?linktr\.ee\/[a-zA-Z0-9._-]+\/?$/,
@@ -37,7 +47,8 @@ const profilePatterns = {
 const disqualifyingPatterns = [
     'view profile of people named', 'search results',
     '/p/', '/posts/', '/status/', '/photos/', '/videos/', '/reel/', '/stories/',
-    '/groups/', '/marketplace/', '/watch/', '/search/', '/events/'
+    '/groups/', '/marketplace/', '/watch/', '/search/', '/events/',
+    '/pin/', '/clip/', '/watch?v=', '/shorts/', '/channel/'
 ];
 
 // Heuristic noise patterns ubiquitous in social snippets
@@ -109,15 +120,17 @@ function calculateIdentityScore(result, personName, options = {}) {
     score += (nameMatches / nameParts.length) * 40;
 
     // 2. Company/Identity Core Match (0-50 points)
+    let hasKeywordMatch = false;
     if (keywords && keywords.length > 0) {
         let keywordMatches = 0;
         const kwList = Array.isArray(keywords) ? keywords : [keywords];
 
         kwList.forEach(kw => {
             const lowerKw = kw.toLowerCase().trim();
-            if (combinedText.includes(lowerKw)) keywordMatches += 2;
+            if (lowerKw && combinedText.includes(lowerKw)) keywordMatches += 2;
         });
 
+        if (keywordMatches > 0) hasKeywordMatch = true;
         score += Math.min(keywordMatches * 25, 50);
     }
 
@@ -126,14 +139,32 @@ function calculateIdentityScore(result, personName, options = {}) {
         score += 10;
     }
 
-    // 4. Penalty System (instead of hard disqualification for some terms)
+    // 4. NAME COLLISION PENALTY (Critical for common names)
+    // If we have keywords/context but NONE match the candidate, this is likely a different person
+    if (keywords && keywords.length > 0 && !hasKeywordMatch && !knownHandle) {
+        // Check if the snippet contains a DIFFERENT person's identity markers
+        const nameLower = personName.toLowerCase();
+        const firstNamePart = nameParts[0] || '';
+
+        // If the snippet/bio mentions a different first name alongside same last name = collision
+        const differentFirstNames = ['founder', 'ceo', 'director', 'manager', 'engineer'];
+        const hasProfessionalTitle = differentFirstNames.some(t => combinedText.includes(t));
+
+        if (hasProfessionalTitle && !hasKeywordMatch) {
+            // Has a professional context but it doesn't match our target's context
+            console.log(`    [Collision Penalty] Name match but no keyword overlap for ${platform}: ${link}`);
+            score -= 25;
+        }
+    }
+
+    // 5. Penalty System (instead of hard disqualification for some terms)
     // Low-weight markers that imply it MIGHT be a post rather than a profile
     const softDisqualifiers = ['posted', 'shared', 'mentioned', 'reposted', 'tweeted'];
     softDisqualifiers.forEach(term => {
         if (rawSnippet.toLowerCase().includes(term)) score -= 15;
     });
 
-    // 5. Business Page Penalty
+    // 6. Business Page Penalty
     const businessPatterns = ["global", "solutions", "team", "services", "corporate", "agency", "consulting"];
     const isLikelyBusiness = businessPatterns.some(p => link.includes(p) || title.includes(p));
     const titleIsPersonal = title.includes(personName.toLowerCase());
@@ -178,6 +209,12 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         else if (link.includes('twitter.com') || link.includes('x.com')) platform = 'twitter';
         else if (link.includes('instagram.com')) platform = 'instagram';
         else if (link.includes('facebook.com')) platform = 'facebook';
+        else if (link.includes('t.me/')) platform = 'telegram';
+        else if (link.includes('tiktok.com')) platform = 'tiktok';
+        else if (link.includes('pinterest.com')) platform = 'pinterest';
+        else if (link.includes('youtube.com')) platform = 'youtube';
+        else if (link.includes('snapchat.com')) platform = 'snapchat';
+        else if (link.includes('reddit.com')) platform = 'reddit';
         else if (link.includes('crunchbase.com/person/')) platform = 'crunchbase';
         else if (link.includes('medium.com')) platform = 'medium';
         else if (link.includes('stackoverflow.com/users/')) platform = 'stackoverflow';
@@ -212,7 +249,7 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         });
 
         // Reject low confidence matches
-        if (identityScore < 10) {
+        if (identityScore < 20) {
             console.log(`  [Skip] ${platform}: Score too low (${identityScore}) -> ${link}`);
             return;
         }
@@ -261,5 +298,12 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
     console.log(`[Social Discovery] Final count (deduped): ${dedupedAccounts.length}`);
     return dedupedAccounts;
 }
+
+export const supportedPlatformDomains = [
+    'linkedin.com/in/', 'github.com', 'twitter.com', 'x.com', 'instagram.com',
+    'facebook.com', 't.me/', 'tiktok.com', 'pinterest.com', 'youtube.com',
+    'snapchat.com', 'reddit.com', 'crunchbase.com/person/', 'medium.com',
+    'stackoverflow.com/users/', 'behance.net', 'dribbble.com', 'linktr.ee', 'about.me'
+];
 
 export { calculateIdentityScore };

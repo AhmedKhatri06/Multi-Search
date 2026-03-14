@@ -3,6 +3,7 @@ import "../index.css";
 import LivePreviewViewer from "../components/LivePreviewViewer";
 import AuthModal from "../components/AuthModal";
 import { AuthContext } from "../context/AuthContext";
+import ReactMarkdown from 'react-markdown';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
@@ -16,6 +17,12 @@ const getPlatformEmoji = (platform) => {
     if (p.includes('twitter') || p.includes('x')) return '🐦';
     if (p.includes('instagram')) return '📸';
     if (p.includes('facebook')) return '👥';
+    if (p.includes('telegram') || p.includes('t.me')) return '🛡️';
+    if (p.includes('tiktok')) return '🎵';
+    if (p.includes('pinterest')) return '📌';
+    if (p.includes('youtube')) return '📺';
+    if (p.includes('snapchat')) return '👻';
+    if (p.includes('reddit')) return '👽';
     if (p.includes('wikipedia')) return '📚';
     if (p.includes('britannica')) return '🏛️';
     if (p.includes('crunchbase')) return '🏢';
@@ -30,16 +37,19 @@ const getPlatformEmoji = (platform) => {
 
 const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, personaName }) => {
     const loadingMessages = [
-        "Capturing digital signals",
-        "Diving into the deep web",
-        "Uncovering hidden insights",
-        "Following the digital trail",
-        "Finalizing intel bundle"
+        "Initializing intelligence scan",
+        "Querying distributed data nodes",
+        "Analyzing digital footprint",
+        "Cross-referencing identity signals",
+        "Compiling final intel report"
     ];
+
+    const clampedProgress = Math.min(Math.floor(progress), 100);
 
     return (
         <div className="workflow-loading-screen modern-glass-mode">
             <div className="ambient-glow-bg"></div>
+            <div className="ambient-glow-bg glow-secondary"></div>
 
             <button className="cancel-pill" onClick={onCancel} title="Cancel Search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
@@ -49,19 +59,35 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
             </button>
 
             <div className="floating-intelligence-pill">
-                <div className="pill-top-section">
-                    <div className="ai-status-orb">
-                        <div className="orb-inner"></div>
-                    </div>
-                    <div className="ai-header-info">
-                        <span className="ai-label">INTEL CORE ACTIVE</span>
-                        <h2 className="ai-target-title">{personaName || query}</h2>
+                {/* Scan Ring + Orb */}
+                <div className="scan-ring-container">
+                    <svg className="scan-ring-svg" viewBox="0 0 120 120">
+                        <circle className="scan-ring-track" cx="60" cy="60" r="54" />
+                        <circle
+                            className="scan-ring-fill"
+                            cx="60" cy="60" r="54"
+                            strokeDasharray={`${clampedProgress * 3.39} ${339.29 - clampedProgress * 3.39}`}
+                            strokeDashoffset="84.82"
+                        />
+                    </svg>
+                    <div className="scan-orb">
+                        <div className="scan-orb-pulse"></div>
+                        <div className="scan-orb-core"></div>
                     </div>
                 </div>
 
+                {/* Target Identity */}
+                <div className="pill-identity-block">
+                    <span className="pill-intel-label">INTEL CORE ACTIVE</span>
+                    <h2 className="pill-target-name">{personaName || query}</h2>
+                </div>
+
+                {/* Progress Bar */}
                 <div className="pill-progress-section">
                     <div className="liquid-progress-container">
-                        <div className="liquid-progress-fill" style={{ width: `${progress}%` }}></div>
+                        <div className="liquid-progress-fill" style={{ width: `${clampedProgress}%` }}>
+                            <div className="progress-shimmer"></div>
+                        </div>
                     </div>
 
                     <div className="pill-meta-row">
@@ -70,9 +96,19 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
                             <span className="status-text">{loadingMessages[currentStep]}</span>
                         </div>
                         <div className="pill-percentage-bubble">
-                            {Math.floor(progress)}%
+                            {clampedProgress}%
                         </div>
                     </div>
+                </div>
+
+                {/* Step Indicators */}
+                <div className="pill-steps-row">
+                    {loadingMessages.map((msg, idx) => (
+                        <div key={idx} className={`step-pip ${idx < currentStep ? 'completed' : ''} ${idx === currentStep ? 'active' : ''}`}>
+                            <div className="pip-dot"></div>
+                            {idx < loadingMessages.length - 1 && <div className="pip-connector"></div>}
+                        </div>
+                    ))}
                 </div>
             </div>
         </div>
@@ -188,6 +224,7 @@ const MultiSearchPage = () => {
 
     const { user, logout } = useContext(AuthContext);
     const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+    const abortControllerRef = useRef(null);
 
     // B-001: Extract Search Parameters Automatically=
     const cardRefs = useRef({});
@@ -395,12 +432,18 @@ const MultiSearchPage = () => {
                     matchedGroup.emails.push(item.email);
                 }
 
-                // Merge unique descriptions
+                // Merge unique descriptions into a single standard string
                 if (item.description && item.description !== 'No description available') {
-                    if (!matchedGroup.descriptions.includes(item.description)) {
-                        matchedGroup.descriptions.push(item.description);
+                    // Standardize: remove redundant "SBMP" or other AI suffixes from sub-descriptions
+                    const cleanDesc = item.description.split(' - ')[0].trim();
+                    if (!matchedGroup.descriptions.includes(cleanDesc)) {
+                        matchedGroup.descriptions.push(cleanDesc);
                     }
                 }
+
+                // Construct a single primary description
+                matchedGroup.richDescription = matchedGroup.descriptions.slice(0, 2).join(" | ");
+
                 // Merge unique sources
                 const itemSource = item.source || "Unknown";
                 if (!matchedGroup.sources.includes(itemSource)) {
@@ -419,11 +462,14 @@ const MultiSearchPage = () => {
                 if (sourceLabel.toLowerCase() === 'sqlite') sourceLabel = 'Identity SQL';
                 if (sourceLabel.toLowerCase() === 'mongodb') sourceLabel = 'Cluster DB';
 
+                const descriptions = (item.description && item.description !== 'No description available') ? [item.description] : [];
+
                 groups.push({
                     ...item,
                     phoneNumbers: item.phoneNumbers || (item.phone ? [item.phone] : []),
                     emails: item.email ? [item.email.toLowerCase()] : (item.emails || []),
-                    descriptions: (item.description && item.description !== 'No description available') ? [item.description] : [],
+                    descriptions: descriptions,
+                    richDescription: descriptions.slice(0, 2).join(" | "),
                     sources: [sourceLabel]
                 });
             }
@@ -431,7 +477,18 @@ const MultiSearchPage = () => {
         return groups;
     };
 
+    const cancelSearch = () => {
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            console.log("[Search] Cancellation Signal Sent");
+        }
+    };
+
     const handleIdentify = async (precisionData = null) => {
+        // Cancel any pending search first
+        cancelSearch();
+        abortControllerRef.current = new AbortController();
+
         // Ensure precisionData is actually a data object, not a React Event
         const isData = precisionData && typeof precisionData === 'object' && !precisionData.nativeEvent;
         const searchData = isData ? precisionData : null;
@@ -473,7 +530,7 @@ const MultiSearchPage = () => {
                     keywords: precisionData?.keyword || "",
                     number: precisionData?.number || ""
                 }),
-                signal: controller.signal
+                signal: abortControllerRef.current?.signal
             });
             clearTimeout(timeoutId);
 
@@ -529,7 +586,7 @@ const MultiSearchPage = () => {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ person: candidate }),
-                signal: controller.signal
+                signal: abortControllerRef.current?.signal
             });
             clearTimeout(timeoutId);
 
@@ -936,18 +993,15 @@ const MultiSearchPage = () => {
                                 <div key={idx} ref={el => { cardRefs.current[idx] = el; }} className={`saas-card animate-scale-in ${expandedCards.has(idx) ? 'expanded' : ''}`} onClick={() => handleCandidateSelect(person)} style={{ cursor: 'pointer' }}>
                                     <div className="card-icon" style={{ marginTop: '0.25rem' }}>👤</div>
                                     <div className="card-body">
-                                        <div className="card-meta">{person.confidence} Accuracy</div>
-                                        <h3 className="card-title">{person.name}</h3>
+                                        <div className="card-meta">
+                                            {person.confidence === 'high' ? 'High Accuracy' : 'Identity Probable'}
+                                            {person.source === 'local' && <span className="verified-badge">✓ Verified</span>}
+                                        </div>
+                                        <h3 className="card-title">{(person.name || "").split(' - ')[0]}</h3>
 
-                                        {person.descriptions && person.descriptions.length > 0 ? (
-                                            <ul className="card-desc-list">
-                                                {person.descriptions.map((desc, i) => (
-                                                    <li key={i}>{desc}</li>
-                                                ))}
-                                            </ul>
-                                        ) : (
-                                            <p className="card-desc">{person.description || "No description available"}</p>
-                                        )}
+                                        <p className="card-desc">
+                                            {person.richDescription || person.description || "Intelligence Synthesis Target"}
+                                        </p>
 
                                         <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                                             {person.phoneNumbers && person.phoneNumbers.length > 0 && (
@@ -1083,24 +1137,31 @@ const MultiSearchPage = () => {
                                 {deepData.images && deepData.images.length > 0 ? (
                                     <div className="gallery-slider">
                                         {deepData.images.map((img, idx) => {
+                                            const initials = person.name ? person.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
                                             const displayUrl = img.isBlocked ? img.thumbnail : img.original;
                                             return (
-                                                <img
-                                                    key={idx}
-                                                    src={displayUrl}
-                                                    className="gallery-thumbnail"
-                                                    alt="Evidence"
-                                                    onClick={() => openPreview(img.original, 'Media')}
-                                                    style={{ cursor: 'pointer' }}
-                                                    onError={(e) => {
-                                                        // If original failed and we weren't already using thumbnail, try thumbnail
-                                                        if (e.target.src !== img.thumbnail && img.thumbnail) {
-                                                            e.target.src = img.thumbnail;
-                                                        } else {
-                                                            e.target.style.display = 'none';
-                                                        }
-                                                    }}
-                                                />
+                                                <div key={idx} className="gallery-item-wrapper" style={{ position: 'relative', width: '120px', height: '120px', borderRadius: '12px', overflow: 'hidden', background: '#f1f5f9', flexShrink: 0 }}>
+                                                    <img
+                                                        src={displayUrl}
+                                                        className="gallery-thumbnail"
+                                                        alt="Evidence"
+                                                        onClick={() => openPreview(img.original, 'Media')}
+                                                        style={{ cursor: 'pointer', width: '100%', height: '100%', objectFit: 'cover' }}
+                                                        onError={(e) => {
+                                                            // If original failed and we weren't already using thumbnail, try thumbnail
+                                                            if (displayUrl !== img.thumbnail && img.thumbnail) {
+                                                                e.target.src = img.thumbnail;
+                                                            } else {
+                                                                // Show placeholder if all fails
+                                                                e.target.style.display = 'none';
+                                                                e.target.parentElement.querySelector('.img-placeholder').style.display = 'flex';
+                                                            }
+                                                        }}
+                                                    />
+                                                    <div className="img-placeholder" style={{ display: 'none', width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #e2e8f0 0%, #cbd5e1 100%)', color: '#64748b', fontSize: '1.5rem', fontWeight: 800 }}>
+                                                        {initials}
+                                                    </div>
+                                                </div>
                                             );
                                         })}
                                     </div>
@@ -1207,8 +1268,8 @@ const MultiSearchPage = () => {
                                     <div className="category-header">
                                         <h3 className="category-title">✨ AI Synthesis</h3>
                                     </div>
-                                    <div className="ai-summary-block" style={{ padding: '1.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--accent)', color: 'var(--text-main)', lineHeight: '1.6', fontSize: '1rem' }}>
-                                        {deepData.person.aiSummary}
+                                    <div className="ai-summary-block prose" style={{ padding: '1.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--accent)', color: 'var(--text-main)', lineHeight: '1.6', fontSize: '1rem' }}>
+                                        <ReactMarkdown>{deepData.person.aiSummary}</ReactMarkdown>
                                     </div>
                                 </div>
                             )}

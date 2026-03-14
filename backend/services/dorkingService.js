@@ -39,7 +39,10 @@ export function generateTier1Dorks(name, keywords = '', location = '') {
         'site:instagram.com',
         'site:twitter.com',
         'site:x.com',
-        'site:facebook.com'
+        'site:facebook.com',
+        'site:wellfound.com',
+        'site:producthunt.com',
+        'site:reddit.com/user/'
     ].join(' OR ');
     dorks.push(`${quotedName} (${socialSites})`.trim());
 

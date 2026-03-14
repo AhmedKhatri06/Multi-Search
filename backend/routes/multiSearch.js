@@ -6,7 +6,7 @@ import SearchCache from "../models/SearchCache.js";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import { identifyPeople, generateText, verifyIdentityMatch } from "../services/aiService.js";
-import { extractSocialAccounts } from "../services/socialMediaService.js";
+import { extractSocialAccounts, supportedPlatformDomains } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName } from "../utils/searchHelper.js";
 import { searchCSVs } from "../services/csvSearchService.js";
@@ -34,10 +34,15 @@ const normalizeImageUrl = (url, thumbnail) => {
     const blockedDomains = ['instagram.com', 'fbcdn.net', 'facebook.com', 'pinterest.com'];
     const isBlocked = blockedDomains.some(d => url.includes(d));
 
+    // Support data URLs
+    if (url.startsWith('data:')) {
+        return { original: url, thumbnail: url, isBlocked: false };
+    }
+
     return {
         original: normalized,
         thumbnail: thumbnail || normalized,
-        isBlocked
+        isBlocked: isBlocked || url === thumbnail // If original and thumb are same, it might be a single-source thumb
     };
 };
 
@@ -174,12 +179,8 @@ export async function performSearch(query, simpleMode = false) {
 
         // STRICT SEARCH (Default): Apply filters for social profiles
         if (!simpleMode) {
-            const profileSites = [
-                "site:linkedin.com/in/",
-                "site:instagram.com", "site:facebook.com",
-                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/"
-            ].join(" OR ");
-            socialQuery = `${internetQuery} (${profileSites})`.trim();
+            const socialSitesFilter = supportedPlatformDomains.map(d => `site:${d}`).join(" OR ");
+            socialQuery = `${internetQuery} (${socialSitesFilter})`.trim();
         } else {
             // SIMPLE SEARCH: Just text, maybe explicitly exclude some junk?
             // For now, raw query is best for "Simple Google Search"
@@ -623,7 +624,61 @@ router.post("/identify", async (req, res) => {
             resolvedPersona = localCandidates[0];
         }
 
+        // --- POST FILTER: Remove social media posts/statuses from candidate list ---
+        const postUrlPatterns = [
+            /\/posts\//i,
+            /\/status\//i,
+            /\/p\//i,
+            /story\.php/i,
+            /\/reel\//i,
+            /\/watch\//i
+        ];
+        const postTitlePatterns = [
+            /\/ posts \/ x$/i,
+            /\/ posts$/i,
+            /on facebook$/i,
+            /on twitter$/i,
+            /on instagram$/i,
+            /posted on/i,
+            /shared a post/i,
+            /\(@\w+\) \/ posts/i  // e.g. "mihir doshi (@mihirdoshi) / Posts / X"
+        ];
+
+        // ADDED: List of specific sites to build the dynamic query
+        const socialSitesFilter = supportedPlatformDomains.map(d => `site:${d}`).join(" OR ");
+
+        const isPostCandidate = (candidate) => {
+            // Never filter local candidates
+            if (candidate.source === "local") return false;
+
+            const url = (candidate.url || "").toLowerCase();
+            const title = (candidate.name || "").toLowerCase();
+            const desc = (candidate.description || "").toLowerCase();
+
+            // 1. Check URL patterns (Strongest indicator of a post)
+            if (postUrlPatterns.some(pattern => pattern.test(url))) {
+                console.log(`[Filter] Removed as post URL: ${candidate.name} | ${url}`);
+                return true;
+            }
+
+            // 2. Profile Exemption: If it looks like a main profile URL, don't filter it by title keywords
+            const isMainProfile = url.includes("linkedin.com/in/") || url.includes("facebook.com/") || url.includes("instagram.com/") || url.includes("twitter.com/") || url.includes("x.com/");
+            const cleanUrl = url.split('?')[0]; // Remove query params
+            const isDeepLink = cleanUrl.includes("/posts/") || cleanUrl.includes("/status/") || cleanUrl.includes("/p/") || cleanUrl.includes("/reel/");
+
+            if (isMainProfile && !isDeepLink) return false;
+
+            // 3. Title Keyword check (only if not a main profile)
+            if (postTitlePatterns.some(pattern => pattern.test(title)) || postTitlePatterns.some(pattern => pattern.test(desc))) {
+                console.log(`[Filter] Removed as post content: ${candidate.name}`);
+                return true;
+            }
+
+            return false;
+        };
+
         const finalCandidates = Array.from(mergedIdentities.values())
+            .filter(c => !isPostCandidate(c))
             .sort((a, b) => {
                 if (a.source === "local" && b.source !== "local") return -1;
                 if (a.source !== "local" && b.source === "local") return 1;
@@ -770,10 +825,11 @@ router.post("/deep", async (req, res) => {
 
         // Query 1: Targeted Social Sweep (Strict with anchors)
         const hasK = keyword && name.toLowerCase().includes(keyword.toLowerCase());
-        const socialQueryStrict = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (site: linkedin.com/in/ OR site: github.com OR site: twitter.com OR site: instagram.com OR site: facebook.com)`.trim();
+        const socialSitesFilter = supportedPlatformDomains.map(d => `site:${d}`).join(" OR ");
+        const socialQueryStrict = `"${name}" ${hasK ? "" : keyword}${anchorQuery} (${socialSitesFilter})`.trim();
 
         // Query 1b: Broad Social Sweep (Fallback if anchors fail)
-        const socialQueryBroad = `"${name}" ${hasK ? "" : keyword} (site: linkedin.com/in/ OR site: github.com OR site: twitter.com OR site: instagram.com OR site: facebook.com)`.trim();
+        const socialQueryBroad = `"${name}" ${hasK ? "" : keyword} (${socialSitesFilter})`.trim();
 
         // Query 2: Broad Context Sweep (Contacts/Emails focus)
         const contextKeywords = keyword || cleanProfession || "profile OR bio OR contact";
@@ -974,13 +1030,23 @@ router.post("/deep", async (req, res) => {
             }
         }
 
+        console.log(`[Deep Search] Initiating for: ${name}`);
+
+        // Cancellation Detection
+        let searchIsCancelled = false;
+        req.on('close', () => {
+            console.log(`[Deep Search] Request closed by client for: ${name}. Marking as cancelled.`);
+            searchIsCancelled = true;
+        });
+
+        const isCancelled = () => searchIsCancelled;
         console.log(`[Deep Search] Identity Anchor elected: ${identityAnchor ? identityAnchor.substring(0, 50) + '...' : 'NONE'}`);
 
-        // 4. Extract Contacts
+        // 4. Extract Contacts (with name-aware email filtering)
         const webPhones = new Set();
         const webEmails = new Set();
         allSearchItems.forEach(r => {
-            const extracted = extractContacts(r.text);
+            const extracted = extractContacts(r.text, name);
             extracted.phones.forEach(p => webPhones.add(p));
             extracted.emails.forEach(e => webEmails.add(e));
         });
@@ -1032,11 +1098,17 @@ router.post("/deep", async (req, res) => {
                         link: r.url
                     }, name, contextKeywordsList);
 
+                    // Consistency: Use normalization even for organic images
+                    const norm = normalizeImageUrl(imgUrl);
+                    if (!norm) return;
+
                     candidateImages.push({
-                        url: imgUrl,
+                        url: norm.original,
+                        thumbnail: norm.thumbnail,
                         score: isSocialMatch ? Math.max(organicScore, 80) : organicScore,
                         source: r.provider || 'Web',
-                        type: 'organic'
+                        type: 'organic',
+                        isBlocked: norm.isBlocked
                     });
                 });
             }
@@ -1048,10 +1120,17 @@ router.post("/deep", async (req, res) => {
         const verificationList = candidateImages
             .sort((a, b) => b.score - a.score)
             .filter(img => img.score >= 10 || img.type === 'profile')
-            .slice(0, 8); // Verify top 8 matches to ensure quality and speed
+            .slice(0, 15); // Verify top 15 matches to ensure quality and speed
 
         console.log(`[Deep Search] Starting Layer 2: Face Similarity Filtering for ${verificationList.length} images...`);
+
+        // MULTI-ANCHOR DYNAMIC ELECTION
+        // If the primary identityAnchor is missing or fails verification, we elect the best candidate
+        let activeAnchor = identityAnchor;
+        let electedAnchorUrl = null;
+
         const verificationPromises = verificationList.map(async (img) => {
+            if (isCancelled()) return { ...img, isBlocked: true, similarity: 0 };
             try {
                 const currentUrl = img.url || img.imageUrl;
 
@@ -1062,14 +1141,23 @@ router.post("/deep", async (req, res) => {
                     return { ...img, isBlocked: true, similarity: 0 };
                 }
 
-                if (identityAnchor) {
-                    if (currentUrl === identityAnchor) return { ...img, similarity: 100, isBlocked: false };
+                // If we don't have an activeAnchor yet (it was missing or we want to find the best one)
+                // We'll use the first image that has a face as a tentative anchor if needed
+                if (!activeAnchor && img.type === 'profile' && !electedAnchorUrl) {
+                    electedAnchorUrl = currentUrl;
+                    console.log(`[DeepSearch] No primary anchor found. Electing profile image as temporary anchor: ${currentUrl}`);
+                }
+
+                const comparisonAnchor = activeAnchor || electedAnchorUrl;
+
+                if (comparisonAnchor) {
+                    if (currentUrl === comparisonAnchor) return { ...img, similarity: 100, isBlocked: false };
 
                     // STRICT GATE 2: Face Similarity
-                    const similarity = await verifyFaceSimilarity(identityAnchor, currentUrl);
+                    const similarity = await verifyFaceSimilarity(comparisonAnchor, currentUrl);
 
-                    // balanced threshold check
-                    if (similarity < 80) {
+                    // relaxed threshold check (55 is fair for varied headshots)
+                    if (similarity < 55) {
                         console.log(`[DeepSearch] Blocking non-matching face: ${currentUrl} (Score: ${similarity})`);
                         return { ...img, isBlocked: true, similarity };
                     } else {
@@ -1087,8 +1175,12 @@ router.post("/deep", async (req, res) => {
 
         const verifiedImages = await Promise.all(verificationPromises);
         verifiedImages.forEach(img => {
+            if (!img) return; // Skip nulls
             const url = img.url || img.imageUrl;
-            if (!img.isBlocked && url && !seenUrls.has(url)) {
+
+            // Allow BLOCKED images to pass (frontend handles them via thumbnails)
+            // They were previously being hidden here because !img.isBlocked was too strict
+            if (url && !seenUrls.has(url)) {
                 seenUrls.add(url);
                 finalGallery.push(img);
             }
@@ -1117,31 +1209,52 @@ router.post("/deep", async (req, res) => {
             isBlocked: img.isBlocked
         }));
 
-        // 6. Article Extraction (excluding results identified as social)
+        // 6. Article Extraction (label social-origin items as evidence)
         const socialUrls = new Set(socialProfiles.map(s => s.url.toLowerCase()));
+        const socialPlatformDomains = ['facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'tiktok.com', 'reddit.com'];
         const articles = allSearchItems
             .filter(r => !socialUrls.has(r.url.toLowerCase()))
-            .map(r => ({ title: r.title, snippet: r.text, url: r.url, provider: r.provider }))
+            .map(r => {
+                const urlLower = (r.url || '').toLowerCase();
+                const isSocialEvidence = socialPlatformDomains.some(d => urlLower.includes(d));
+                return {
+                    title: r.title,
+                    snippet: r.text,
+                    url: r.url,
+                    provider: r.provider,
+                    type: isSocialEvidence ? 'social-evidence' : 'article'
+                };
+            })
             .slice(0, 15);
 
-        // 7. Generate AI Summary
+        // 7. Generate AI Summary (Enhanced with richer context)
         let aiSummary = "";
         try {
             console.time("[AI] Summary Generation");
             const summaryParts = [];
-            if (person.description) summaryParts.push(`Description: ${person.description}`);
+            if (person.description) summaryParts.push(`Professional Description: ${person.description}`);
+            if (person.company) summaryParts.push(`Company/Organization: ${person.company}`);
             if (person.location) summaryParts.push(`Location: ${person.location}`);
             if (localResults.length > 0) {
-                summaryParts.push(`Archive Data: ${localResults.map(r => r.text).join(" | ").substring(0, 500)}`);
+                summaryParts.push(`Internal Archive Records:\n${localResults.map(r => `  - ${r.text}`).join("\n").substring(0, 800)}`);
             }
             if (socialProfiles.length > 0) {
-                summaryParts.push(`Socials: ${socialProfiles.map(s => `${s.platform} (${s.url})`).join(", ")}`);
+                const topSocials = socialProfiles.slice(0, 5);
+                summaryParts.push(`Verified Digital Profiles:\n${topSocials.map(s =>
+                    `  - ${s.platform}: @${s.username} (${s.url}) [Confidence: ${s.confidence}]${s.bio ? ' | Bio: ' + s.bio.substring(0, 150) : ''}`
+                ).join("\n")}`);
             }
             if (articles.length > 0) {
-                summaryParts.push(`Web Mentions: ${articles.map(a => a.title).join(" | ").substring(0, 500)}`);
+                const topArticles = articles.slice(0, 5);
+                summaryParts.push(`Key Web Mentions:\n${topArticles.map(a =>
+                    `  - "${a.title}" — ${(a.snippet || '').substring(0, 200)}`
+                ).join("\n")}`);
+            }
+            if (externalDocuments && externalDocuments.length > 0) {
+                summaryParts.push(`External Documents: ${externalDocuments.map(d => d.title).join(", ").substring(0, 300)}`);
             }
 
-            const prompt = `Synthesize a brief, professional summary (2-3 sentences max) for ${name} based on the following data points:\n${summaryParts.join("\n")}\nFocus on their professional identity, notable associations, and key digital footprint. Do not use filler text.`;
+            const prompt = `Generate a comprehensive professional dossier summary for ${name}.\n\nAVAILABLE INTELLIGENCE:\n${summaryParts.join("\n\n")}\n\nSynthesize all data points into a structured profile. Highlight professional identity, digital presence, and any notable findings.`;
             aiSummary = await generateText(prompt);
             console.timeEnd("[AI] Summary Generation");
         } catch (summaryErr) {
