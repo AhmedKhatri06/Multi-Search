@@ -115,7 +115,7 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
     );
 };
 
-const MultiSearchPage = () => {
+const LookUpPage = () => {
     // Workflow Stages
     const STAGES = {
         ENTRY: "ENTRY",
@@ -1398,4 +1398,4 @@ const MultiSearchPage = () => {
     );
 };
 
-export default MultiSearchPage;
+export default LookUpPage;

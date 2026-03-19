@@ -40,7 +40,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       - If a search result is clearly a single post or status update (not a profile page), IGNORE it entirely.
       
       OUTPUT FORMAT:
-      Return a JSON array of up to 4 distinct identity candidate objects.
+      Return a JSON array of up to 12 distinct identity candidate objects.
       Each object MUST have:
       {
           "name": "Full Name",

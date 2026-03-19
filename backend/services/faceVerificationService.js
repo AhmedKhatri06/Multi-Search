@@ -29,7 +29,8 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
 
         if (!anchorData || !candidateData) return 0;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Use gemini-2.0-flash which is provisioned for this project/key
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const prompt = `
             Task: Compare the faces in these two images to determine if they are the same person.
@@ -68,8 +69,12 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
         console.warn("[FaceVerification] Could not parse AI response. Falling back to 'Probable'.");
         return 55; // Probable match if response is unreadable
     } catch (error) {
-        console.error("[FaceVerification] Error:", error.message);
-        // Fallback for network/fetch/API failures to prevent accidental image disappearance
+        if (error.message?.includes("429")) {
+            console.warn("[FaceVerification] Quota exceeded (429). Skipping similarity check.");
+        } else {
+            console.error("[FaceVerification] Similarity check error:", error.message);
+        }
+        // Fallback to high score for network/fetch/API failures to prevent accidental image disappearance
         return 55;
     }
 }
@@ -91,7 +96,8 @@ export async function detectHumanFace(imageUrl) {
         const imageData = await fetchImageAsBase64(imageUrl);
         if (!imageData) return false;
 
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Use gemini-2.0-flash which is provisioned for this project/key
+        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
 
         const prompt = `
             Task: Analyze this image and determine if it contains a clear, identifiable human face.
@@ -123,8 +129,12 @@ export async function detectHumanFace(imageUrl) {
         console.warn("[FaceVerification] Could not parse face detection response. Falling back to true.");
         return true;
     } catch (error) {
-        console.error("[FaceVerification] Face detection error:", error.message);
-        // Fallback to true for network errors to prevent blocking valid images
+        if (error.message?.includes("429")) {
+            console.warn("[FaceVerification] Quota exceeded (429). Skipping detection gate.");
+        } else {
+            console.error("[FaceVerification] Face detection error:", error.message);
+        }
+        // Fallback to true for network/quota errors to prevent blocking valid images
         return true;
     }
 }
@@ -141,9 +151,11 @@ async function fetchImageAsBase64(url) {
     try {
         const response = await axios.get(url, {
             responseType: 'arraybuffer',
-            timeout: 8000,
+            timeout: 10000, // Increased to 10s for slow CDNs
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8',
+                'Referer': 'https://www.google.com/'
             }
         });
         return Buffer.from(response.data, 'binary').toString('base64');

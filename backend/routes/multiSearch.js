@@ -224,6 +224,9 @@ export async function performSearch(query, simpleMode = false) {
             else if (link.includes("facebook.com")) provider = "Facebook";
             else if (link.includes("twitter.com") || link.includes("x.com")) provider = "Twitter/X";
             else if (link.includes("rocketreach.co")) provider = "RocketReach";
+            else if (link.includes("wikipedia.org")) provider = "Wikipedia";
+            else if (link.includes("imdb.com")) provider = "IMDb";
+            else if (link.includes("britannica.com")) provider = "Britannica";
 
             // FILTERS: Apply name consistency checks to ALL results
             const nameParts = nameLower.split(" ").filter(p => p.length > 1); // "ahmed", "khatri"
@@ -320,6 +323,23 @@ export async function performSearch(query, simpleMode = false) {
                     console.log(`[Filter] Dropped(Noise): ${title} `);
                     return;
                 }
+                const knowledgeDomains = ['wikipedia.org', 'imdb.com/name', 'britannica.com', 'biography.com'];
+                const isKnowledge = knowledgeDomains.some(d => link.includes(d));
+                
+                if (isKnowledge) {
+                    internetResults.push({
+                        id: `knowledge-${index}`,
+                        title: item.title || "Untitled Result",
+                        text: item.snippet || "No description available",
+                        url: item.link || "",
+                        source: "KnowledgeBase",
+                        provider: provider,
+                        type: "KNOWLEDGE",
+                        priority: 0, // Top priority
+                        images: item.imageUrl ? [item.imageUrl] : []
+                    });
+                    return;
+                }
             }
 
             internetResults.push({
@@ -394,7 +414,15 @@ router.post("/identify", async (req, res) => {
         return res.status(400).json({ error: "Search query is required" });
     }
 
+    const normQuery = normalize(name + (location || "") + (keywords || "") + (number || ""));
+
     try {
+        // Cache Check
+        const cached = await SearchCache.findOne({ query: normQuery, type: "IDENTIFY" });
+        if (cached) {
+            console.log(`[Identify] Cache Hit: ${name}`);
+            return res.json(cached.data);
+        }
         const inputType = detectInputType(name);
         console.log(`[Identify] Detected Type: ${inputType} | Query: ${name} | Keyword: ${keywords} | Number: ${number} `);
 
@@ -406,7 +434,8 @@ router.post("/identify", async (req, res) => {
         if (inputType === "NAME") {
             const profileSites = [
                 "site:linkedin.com/in/", "site:instagram.com", "site:facebook.com",
-                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/"
+                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/", 
+                "site:en.wikipedia.org", "site:imdb.com/name/"
             ].join(" OR ");
             internetQuery = `${name} ${location || ""} ${keywords || ""} (${profileSites})`.trim();
         } else {
@@ -422,10 +451,13 @@ router.post("/identify", async (req, res) => {
             Document.find({ text: { $regex: searchQuery, $options: "i" } }).limit(10).lean().catch(e => { console.warn("[MongoDB] Identify failed:", e.message); return []; }),
             (async () => {
                 let sRes = await performSearch(internetQuery, true).catch(e => []);
-                if ((!sRes || sRes.length === 0) && inputType === "NAME") {
-                    console.log("[Identify] Filtered search yielded no results, falling back to simple search.");
-                    const simpleQuery = `${name} ${location || ""} ${keywords || ""} `.trim();
-                    sRes = await performSearch(simpleQuery, true).catch(e => []);
+                
+                // Broaden search if very few results found for a likely high-profile name
+                if ((!sRes || sRes.length < 5) && inputType === "NAME") {
+                    console.log(`[Identify] Few dorked results (${sRes?.length}). Triggering broad sweep fallback.`);
+                    const broadQuery = `${name} profile biography official site`;
+                    const broadRes = await performSearch(broadQuery, true).catch(e => []);
+                    sRes = [...(sRes || []), ...(broadRes || [])];
                 }
                 return sRes;
             })()
@@ -483,6 +515,21 @@ router.post("/identify", async (req, res) => {
             }))
         ];
 
+        // NEW: Explicitly extract Knowledge Base candidates to ensure they aren't lost in AI filters
+        const knowledgeCandidates = searchResults
+            .filter(r => r.type === "KNOWLEDGE")
+            .map(r => ({
+                name: r.title.split(/[-|]/)[0].trim(),
+                description: r.text || "Verified Knowledge Base Entry",
+                location: r.provider || "Public Record",
+                company: "Knowledge Base",
+                confidence: "Verified",
+                source: "internet",
+                type: "knowledge",
+                url: r.url,
+                keywordMatched: keywords || ""
+            }));
+
         console.time("[AI] Identification Phase");
         if (searchResults && searchResults.length > 0) {
             try {
@@ -536,7 +583,8 @@ router.post("/identify", async (req, res) => {
         console.timeEnd("[AI] Identification Phase");
 
         // 3. Combine and Deduplicate (Robust Entity Resolution)
-        const combined = [...localCandidates, ...internetCandidates];
+        // Prioritize: Local > KnowledgeBase > InternetAI
+        const combined = [...localCandidates, ...knowledgeCandidates, ...internetCandidates];
         const mergedIdentities = new Map();
 
         combined.forEach(candidate => {
@@ -685,12 +733,22 @@ router.post("/identify", async (req, res) => {
                 return 0;
             });
 
-        res.json({
+
+        const identifyData = {
             candidates: finalCandidates,
             directResolve: directResolve,
             personaName: resolvedPersona ? resolvedPersona.name : null,
             resolvedPersona: resolvedPersona
-        });
+        };
+
+        // Cache persistent storage
+        try {
+            await SearchCache.create({ query: normQuery, type: "IDENTIFY", data: identifyData });
+        } catch (cErr) {
+            if (cErr.code !== 11000) console.error("[Identify] Cache save error:", cErr.message);
+        }
+
+        res.json(identifyData);
     } catch (err) {
         console.error("Identification failed:", err);
         res.status(500).json({ error: "Identification failed" });
@@ -1007,7 +1065,16 @@ router.post("/deep", async (req, res) => {
         });
 
         const refinedProfiles = (await Promise.all(refinementPromises)).filter(p => p !== null);
-        socialProfiles = refinedProfiles;
+        
+        // HEURISTIC FALLBACK: If AI rejected everything, restore the original unrefined list
+        // but mark them as unverified to prevent "Empty Results" for valid queries.
+        if (refinedProfiles.length === 0 && socialProfiles.length > 0) {
+            console.warn(`[Deep Search] AI rejected all ${socialProfiles.length} profiles. Implementing heuristic fallback.`);
+            socialProfiles = socialProfiles.map(p => ({ ...p, aiUnverified: true }));
+        } else {
+            socialProfiles = refinedProfiles;
+        }
+        
         console.log(`[Deep Search] AI Refinement complete. Final profiles: ${socialProfiles.length}`);
 
         // --- Layer 1: Anchor Selection (Highest Confidence Image) ---

@@ -9,7 +9,7 @@ dotenv.config({ path: path.resolve(__dirname, ".env") });
 import express from "express";
 import cors from "cors";
 import mongoose from "mongoose";
-import multiSearchRoute from "./routes/multiSearch.js";
+import lookUpRoute from "./routes/multiSearch.js";
 import internetSearch from "./routes/internetSearch.js";
 import nexaSearchRoute from "./routes/nexaSearch.js";
 import proxyRoute from "./routes/proxy.js";
@@ -30,7 +30,8 @@ mongoose.connect(process.env.MONGO_URI)
 // Start initialization of in-memory caching
 initCSVService().catch(err => console.error("CSV Init Error:", err));
 
-app.use("/api/multi-search", multiSearchRoute);
+app.use("/api/lookup", lookUpRoute);
+app.use("/api/multi-search", lookUpRoute); // Backward compatibility
 app.use("/api/nexa-search", nexaSearchRoute);
 app.use("/api/proxy", proxyRoute);
 app.use("/api/preview", previewRoute);
