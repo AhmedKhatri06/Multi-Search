@@ -11,7 +11,7 @@ import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName } from "../utils/searchHelper.js";
 import { searchCSVs } from "../services/csvSearchService.js";
 import { searchImages, calculateImageScore, searchWithDorks } from "../services/internetSearch.js";
-import { verifyFaceSimilarity, detectHumanFace } from "../services/faceVerificationService.js";
+import { verifyFaceSimilarity, detectHumanFace, batchWithPacing } from "../services/faceVerificationService.js";
 import { generateDorks, generatePivotDorks, generateDocumentDorks } from "../services/dorkingService.js";
 
 dotenv.config();
@@ -1196,7 +1196,7 @@ router.post("/deep", async (req, res) => {
         let activeAnchor = identityAnchor;
         let electedAnchorUrl = null;
 
-        const verificationPromises = verificationList.map(async (img) => {
+        const verifiedImages = await batchWithPacing(verificationList, async (img) => {
             if (isCancelled()) return { ...img, isBlocked: true, similarity: 0 };
             try {
                 const currentUrl = img.url || img.imageUrl;
@@ -1238,9 +1238,7 @@ router.post("/deep", async (req, res) => {
                 console.error(`[DeepSearch] Image verification failed for ${img.url}:`, err.message);
                 return { ...img, isBlocked: true, similarity: 0 };
             }
-        });
-
-        const verifiedImages = await Promise.all(verificationPromises);
+        }, 3, 300);
         verifiedImages.forEach(img => {
             if (!img) return; // Skip nulls
             const url = img.url || img.imageUrl;

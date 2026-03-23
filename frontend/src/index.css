@@ -787,12 +787,11 @@ body {
 .candidates-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 1rem;
+  gap: 1.25rem;
   width: 100%;
-  align-items: stretch;
 }
 
-@media (min-width: 768px) {
+@media (min-width: 640px) {
   .candidates-grid {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -801,6 +800,12 @@ body {
 @media (min-width: 1024px) {
   .candidates-grid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (min-width: 1440px) {
+  .candidates-grid {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
 

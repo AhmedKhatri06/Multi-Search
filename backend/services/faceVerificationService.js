@@ -6,6 +6,35 @@ dotenv.config();
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// Startup Key Health Check
+console.log(`[FaceVerification] Gemini Key Active: ${process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.substring(0, 8) + '...' : 'MISSING'} | Model: gemini-2.0-flash`);
+
+/**
+ * Utility: Delay for rate-limit pacing
+ */
+const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Run async tasks in batches with a delay between each batch to avoid Gemini RPM limits.
+ * @param {Array} items - Items to process
+ * @param {Function} fn - Async function to apply to each item
+ * @param {number} batchSize - Number of concurrent requests per batch
+ * @param {number} delayMs - Delay in ms between batches
+ * @returns {Promise<Array>} Results
+ */
+export async function batchWithPacing(items, fn, batchSize = 3, delayMs = 300) {
+    const results = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        const batchResults = await Promise.all(batch.map(fn));
+        results.push(...batchResults);
+        if (i + batchSize < items.length) {
+            await delay(delayMs); // Pace between batches
+        }
+    }
+    return results;
+}
+
 /**
  * Compares a candidate image against an identity anchor image using Gemini 1.5 Flash.
  * @param {string} anchorUrl URL of the verified anchor image
@@ -70,7 +99,8 @@ export async function verifyFaceSimilarity(anchorUrl, candidateUrl) {
         return 55; // Probable match if response is unreadable
     } catch (error) {
         if (error.message?.includes("429")) {
-            console.warn("[FaceVerification] Quota exceeded (429). Skipping similarity check.");
+            const isRPM = error.message?.includes("rate") || error.message?.includes("RPM");
+            console.warn(`[FaceVerification] ${isRPM ? 'Rate limit (RPM)' : 'Quota exceeded'} (429). Full error: ${error.message}. Skipping similarity check.`);
         } else {
             console.error("[FaceVerification] Similarity check error:", error.message);
         }
@@ -130,7 +160,8 @@ export async function detectHumanFace(imageUrl) {
         return true;
     } catch (error) {
         if (error.message?.includes("429")) {
-            console.warn("[FaceVerification] Quota exceeded (429). Skipping detection gate.");
+            const isRPM = error.message?.includes("rate") || error.message?.includes("RPM");
+            console.warn(`[FaceVerification] ${isRPM ? 'Rate limit (RPM)' : 'Quota exceeded'} (429). Full error: ${error.message}. Skipping detection gate.`);
         } else {
             console.error("[FaceVerification] Face detection error:", error.message);
         }

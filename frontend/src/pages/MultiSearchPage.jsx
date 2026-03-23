@@ -593,9 +593,18 @@ const LookUpPage = () => {
             if (!res.ok) throw new Error(`Deep Search failed with status ${res.status}`);
 
             const result = await res.json();
-            setDeepData(result);
-            setLoadProgress(100); // Complete!
-            setStage(STAGES.DASHBOARD);
+
+            // Validate response before transitioning to Dashboard
+            if (!result || !result.person || !result.person.name) {
+                console.error("[Deep Search] Invalid response payload:", result);
+                setDeepData({ _error: true, person: { name: candidate.name || 'Unknown' }, socials: [], images: [], localData: [] });
+                setLoadProgress(100);
+                setStage(STAGES.DASHBOARD);
+            } else {
+                setDeepData(result);
+                setLoadProgress(100);
+                setStage(STAGES.DASHBOARD);
+            }
 
             const updated = [candidate.name, ...recent.filter(r => r !== candidate.name)].slice(0, 5);
             setRecent(updated);
@@ -610,6 +619,7 @@ const LookUpPage = () => {
                 alert("Failed to retrieve deep search details. Please check your connection.");
             }
             setLoadProgress(0);
+            setStage(STAGES.SELECTING); // Stay on selection instead of limbo
         }
     };
 
@@ -1137,7 +1147,7 @@ const LookUpPage = () => {
                                 {deepData.images && deepData.images.length > 0 ? (
                                     <div className="gallery-slider">
                                         {deepData.images.map((img, idx) => {
-                                            const initials = person.name ? person.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
+                                            const initials = deepData.person?.name ? deepData.person.name.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() : '??';
                                             const displayUrl = img.isBlocked ? img.thumbnail : img.original;
                                             return (
                                                 <div key={idx} className="gallery-item-wrapper" style={{ position: 'relative', width: '120px', height: '120px', borderRadius: '12px', overflow: 'hidden', background: '#f1f5f9', flexShrink: 0 }}>
