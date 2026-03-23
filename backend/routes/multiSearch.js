@@ -614,9 +614,22 @@ router.post("/identify", async (req, res) => {
                 const sharedEmail = candidateEmails.some(e => existing.emails.includes(e));
                 const sharedPhone = candidatePhones.some(p => existing.phoneNumbers.includes(p));
 
+                // IDENTITY CONSOLIDATION: Allow merging on name alone for high-authority sources
+                const isKnowledgeSource = candidate.type === 'knowledge' || existing.type === 'knowledge' ||
+                    (candidate.company || '').toLowerCase() === 'knowledge base' ||
+                    (existing.company || '').toLowerCase() === 'knowledge base';
+                const eitherHasNoCompany = !normCompany || !existingNormCompany ||
+                    normCompany === 'knowledgebase' || existingNormCompany === 'knowledgebase';
+                const bothHighConfidence = candidate.source === 'internet' && existing.source === 'internet' &&
+                    (candidate.confidence === 'High' || candidate.confidence === 'Verified') &&
+                    (existing.confidence === 'High' || existing.confidence === 'Verified');
+
                 // Merge if:
                 // 1. Name matches AND (Company matches OR Shared Contacts)
-                if (nameMatch && (companyMatch || sharedEmail || sharedPhone)) {
+                // 2. Name matches AND one is a Knowledge Base entry
+                // 3. Name matches AND one candidate has no company info
+                // 4. Name matches AND both are high-confidence internet results
+                if (nameMatch && (companyMatch || sharedEmail || sharedPhone || isKnowledgeSource || eitherHasNoCompany || bothHighConfidence)) {
                     existingKey = key;
                     break;
                 }
@@ -909,6 +922,10 @@ router.post("/deep", async (req, res) => {
         const { tier1: tier1Dorks } = generateDorks(dorkParams);
         console.log(`[Deep Search] Generated ${tier1Dorks.length} Tier 1 dork queries`);
 
+        // GLOBAL IDENTITY SWEEP: Unbiased broad search to discover ALL platforms for this name
+        // This ensures consistent results regardless of which selection card was clicked
+        const globalIdentityQuery = `"${name}" (${socialSitesFilter} OR site:en.wikipedia.org OR site:britannica.com)`.trim();
+
         const [
             socialStrict,
             socialBroad,
@@ -916,7 +933,8 @@ router.post("/deep", async (req, res) => {
             initialImageResults,
             wikiResult,
             dorkResults,
-            docResults
+            docResults,
+            globalSweepResults
         ] = await Promise.all([
             performSearch(socialQueryStrict, true).catch(() => []),
             performSearch(socialQueryBroad, true).catch(() => []),
@@ -924,7 +942,8 @@ router.post("/deep", async (req, res) => {
             searchImages(imageQuery, name, contextKeywordsList).catch(() => []),
             searchWikipedia(name).catch(() => null),
             searchWithDorks(tier1Dorks, 10).catch(() => []),
-            searchWithDorks(generateDocumentDorks(dorkParams), 10).catch(() => [])
+            searchWithDorks(generateDocumentDorks(dorkParams), 10).catch(() => []),
+            performSearch(globalIdentityQuery, true).catch(() => [])
         ]);
 
         // Process External Documents
@@ -941,6 +960,12 @@ router.post("/deep", async (req, res) => {
         // Merge and deduplicate results, favoring strict matches
         const socialResults = [...socialStrict];
         socialBroad.forEach(r => {
+            if (!socialResults.some(sr => sr.url === r.url)) socialResults.push(r);
+        });
+
+        // GLOBAL IDENTITY MERGE: Inject unbiased global sweep results
+        // This ensures profiles discovered without card-specific bias are always included
+        (globalSweepResults || []).forEach(r => {
             if (!socialResults.some(sr => sr.url === r.url)) socialResults.push(r);
         });
 
@@ -988,9 +1013,10 @@ router.post("/deep", async (req, res) => {
 
         // --- PHASE 2: RECURSIVE HANDLE PIVOT ---
         // Identify a "Core Identity" to extract a handle for cross-platform matching
+        // EXPANDED: Accept any platform with a username and high identity score
         const coreProfile = socialProfiles.find(s =>
-            (s.platform.toLowerCase() === 'linkedin' || s.platform.toLowerCase() === 'github') &&
-            s.identityScore >= 70
+            s.username && s.identityScore >= 70 &&
+            ['linkedin', 'github', 'twitter', 'x', 'instagram', 'facebook'].includes(s.platform.toLowerCase())
         );
 
         if (coreProfile && coreProfile.username) {
@@ -1077,36 +1103,60 @@ router.post("/deep", async (req, res) => {
         
         console.log(`[Deep Search] AI Refinement complete. Final profiles: ${socialProfiles.length}`);
 
-        // --- Layer 1: Anchor Selection (Highest Confidence Image) ---
-        let identityAnchor = null;
-        const potentialAnchors = [];
-        const linkedInProfile = socialProfiles.find(s => s.platform.toLowerCase() === 'linkedin');
-
-        // Prefer LinkedIn thumbnail as the anchor, fallback to existing local image
-        if (linkedInProfile && linkedInProfile.thumbnail) potentialAnchors.push(linkedInProfile.thumbnail);
-        if (person.image || person.imageUrl) potentialAnchors.push(person.image || person.imageUrl);
-
-        // Validate that the anchor actually contains a human face
-        for (const anchorUrl of potentialAnchors) {
-            const hasFace = await detectHumanFace(anchorUrl);
-            if (hasFace) {
-                identityAnchor = anchorUrl;
-                break;
-            } else {
-                console.log(`[Deep Search] Rejected anchor (no clear human face): ${anchorUrl}`);
-            }
-        }
-
-        console.log(`[Deep Search] Initiating for: ${name}`);
-
-        // Cancellation Detection
+        // Cancellation Detection (moved early)
         let searchIsCancelled = false;
         req.on('close', () => {
             console.log(`[Deep Search] Request closed by client for: ${name}. Marking as cancelled.`);
             searchIsCancelled = true;
         });
-
         const isCancelled = () => searchIsCancelled;
+
+        // --- EARLY-START AI SUMMARY (runs in parallel with image pipeline) ---
+        const aiSummaryPromise = (async () => {
+            try {
+                console.time("[AI] Summary Generation");
+                const summaryParts = [];
+                if (person.description) summaryParts.push(`Professional Description: ${person.description}`);
+                if (person.company) summaryParts.push(`Company/Organization: ${person.company}`);
+                if (person.location) summaryParts.push(`Location: ${person.location}`);
+                if (localResults.length > 0) {
+                    summaryParts.push(`Internal Archive Records:\n${localResults.map(r => `  - ${r.text}`).join("\n").substring(0, 800)}`);
+                }
+                if (socialProfiles.length > 0) {
+                    const topSocials = socialProfiles.slice(0, 5);
+                    summaryParts.push(`Verified Digital Profiles:\n${topSocials.map(s =>
+                        `  - ${s.platform}: @${s.username} (${s.url}) [Confidence: ${s.confidence}]${s.bio ? ' | Bio: ' + s.bio.substring(0, 150) : ''}`
+                    ).join("\n")}`);
+                }
+                const prompt = `Generate a comprehensive professional dossier summary for ${name}.\n\nAVAILABLE INTELLIGENCE:\n${summaryParts.join("\n\n")}\n\nSynthesize all data points into a structured profile. Highlight professional identity, digital presence, and any notable findings.`;
+                const result = await generateText(prompt);
+                console.timeEnd("[AI] Summary Generation");
+                return result;
+            } catch (err) {
+                console.error("[Deep Search] AI Summary generation failed:", err.message);
+                return "";
+            }
+        })();
+
+        // --- Layer 1: Anchor Selection (Parallel Face Detection) ---
+        let identityAnchor = null;
+        const potentialAnchors = [];
+        const linkedInProfile = socialProfiles.find(s => s.platform.toLowerCase() === 'linkedin');
+
+        if (linkedInProfile && linkedInProfile.thumbnail) potentialAnchors.push(linkedInProfile.thumbnail);
+        if (person.image || person.imageUrl) potentialAnchors.push(person.image || person.imageUrl);
+
+        // Validate anchors in parallel instead of sequentially
+        const anchorResults = await Promise.all(
+            potentialAnchors.map(async url => ({ url, hasFace: await detectHumanFace(url) }))
+        );
+        const validAnchor = anchorResults.find(a => a.hasFace);
+        if (validAnchor) {
+            identityAnchor = validAnchor.url;
+        } else {
+            anchorResults.forEach(a => console.log(`[Deep Search] Rejected anchor (no clear human face): ${a.url}`));
+        }
+
         console.log(`[Deep Search] Identity Anchor elected: ${identityAnchor ? identityAnchor.substring(0, 50) + '...' : 'NONE'}`);
 
         // 4. Extract Contacts (with name-aware email filtering)
@@ -1223,8 +1273,8 @@ router.post("/deep", async (req, res) => {
                     // STRICT GATE 2: Face Similarity
                     const similarity = await verifyFaceSimilarity(comparisonAnchor, currentUrl);
 
-                    // relaxed threshold check (55 is fair for varied headshots)
-                    if (similarity < 55) {
+                    // STRICT threshold (70) to prevent unrelated faces from appearing
+                    if (similarity < 70) {
                         console.log(`[DeepSearch] Blocking non-matching face: ${currentUrl} (Score: ${similarity})`);
                         return { ...img, isBlocked: true, similarity };
                     } else {
@@ -1238,14 +1288,14 @@ router.post("/deep", async (req, res) => {
                 console.error(`[DeepSearch] Image verification failed for ${img.url}:`, err.message);
                 return { ...img, isBlocked: true, similarity: 0 };
             }
-        }, 3, 300);
+        }, 3, 150);
         verifiedImages.forEach(img => {
             if (!img) return; // Skip nulls
             const url = img.url || img.imageUrl;
 
-            // Allow BLOCKED images to pass (frontend handles them via thumbnails)
-            // They were previously being hidden here because !img.isBlocked was too strict
-            if (url && !seenUrls.has(url)) {
+            // STRICT FILTER: Only include images that passed face verification
+            // Blocked images are completely excluded from the response
+            if (url && !seenUrls.has(url) && !img.isBlocked) {
                 seenUrls.add(url);
                 finalGallery.push(img);
             }
@@ -1292,39 +1342,8 @@ router.post("/deep", async (req, res) => {
             })
             .slice(0, 15);
 
-        // 7. Generate AI Summary (Enhanced with richer context)
-        let aiSummary = "";
-        try {
-            console.time("[AI] Summary Generation");
-            const summaryParts = [];
-            if (person.description) summaryParts.push(`Professional Description: ${person.description}`);
-            if (person.company) summaryParts.push(`Company/Organization: ${person.company}`);
-            if (person.location) summaryParts.push(`Location: ${person.location}`);
-            if (localResults.length > 0) {
-                summaryParts.push(`Internal Archive Records:\n${localResults.map(r => `  - ${r.text}`).join("\n").substring(0, 800)}`);
-            }
-            if (socialProfiles.length > 0) {
-                const topSocials = socialProfiles.slice(0, 5);
-                summaryParts.push(`Verified Digital Profiles:\n${topSocials.map(s =>
-                    `  - ${s.platform}: @${s.username} (${s.url}) [Confidence: ${s.confidence}]${s.bio ? ' | Bio: ' + s.bio.substring(0, 150) : ''}`
-                ).join("\n")}`);
-            }
-            if (articles.length > 0) {
-                const topArticles = articles.slice(0, 5);
-                summaryParts.push(`Key Web Mentions:\n${topArticles.map(a =>
-                    `  - "${a.title}" — ${(a.snippet || '').substring(0, 200)}`
-                ).join("\n")}`);
-            }
-            if (externalDocuments && externalDocuments.length > 0) {
-                summaryParts.push(`External Documents: ${externalDocuments.map(d => d.title).join(", ").substring(0, 300)}`);
-            }
-
-            const prompt = `Generate a comprehensive professional dossier summary for ${name}.\n\nAVAILABLE INTELLIGENCE:\n${summaryParts.join("\n\n")}\n\nSynthesize all data points into a structured profile. Highlight professional identity, digital presence, and any notable findings.`;
-            aiSummary = await generateText(prompt);
-            console.timeEnd("[AI] Summary Generation");
-        } catch (summaryErr) {
-            console.error("[Deep Search] AI Summary generation failed:", summaryErr.message);
-        }
+        // 7. Await the AI Summary that was started in parallel with the image pipeline
+        const aiSummary = await aiSummaryPromise;
 
         res.json({
             person: {

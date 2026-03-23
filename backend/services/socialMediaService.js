@@ -102,20 +102,20 @@ function calculateIdentityScore(result, personName, options = {}) {
     }
 
     // 1. Adaptive Name Matching (0-40 points)
+    // ENHANCED: Check title, URL, AND snippet/bio for name parts
     const nameParts = personName.toLowerCase().split(/\s+/).filter(p => p.length > 2);
     if (nameParts.length < 1) return 0;
 
     let nameMatches = 0;
     nameParts.forEach(part => {
-        if (title.includes(part) || link.includes(part)) nameMatches++;
+        if (title.includes(part) || link.includes(part) || cleanedSnippet.includes(part)) nameMatches++;
     });
 
-    // REJECTION LOGIC: 
-    // - Professional sites (LinkedIn/Crunchbase) REQUIRE at least 2 name parts or handle match.
-    // - Social sites (IG/X) allow 1 name part if it's a specific match or handle exists.
-    const isProfessional = ['linkedin', 'crunchbase'].includes(platform);
-    if (isProfessional && nameMatches < 2 && !knownHandle) return 0;
-    if (!isProfessional && nameMatches < 1) return 0;
+    // RELAXED REJECTION LOGIC:
+    // All platforms now require at least 1 name part match.
+    // Previously LinkedIn required 2 parts, which filtered out valid profiles with
+    // combined usernames like "mihirdoshi2" where only one name part appears in the URL.
+    if (nameMatches < 1 && !knownHandle) return 0;
 
     score += (nameMatches / nameParts.length) * 40;
 

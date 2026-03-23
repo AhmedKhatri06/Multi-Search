@@ -748,11 +748,23 @@ body {
 
 /* ─── Category Sections (white card blocks) ─── */
 .category-section {
+  position: relative;
   background: var(--bg-surface);
   border: 1px solid var(--border-light);
   border-radius: var(--radius-xl);
   padding: 1.5rem 1.75rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  overflow: hidden;
+}
+
+.category-section::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 5px;
+  height: 100%;
+  background: var(--accent);
 }
 
 .category-header {

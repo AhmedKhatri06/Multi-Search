@@ -1158,11 +1158,9 @@ const LookUpPage = () => {
                                                         onClick={() => openPreview(img.original, 'Media')}
                                                         style={{ cursor: 'pointer', width: '100%', height: '100%', objectFit: 'cover' }}
                                                         onError={(e) => {
-                                                            // If original failed and we weren't already using thumbnail, try thumbnail
                                                             if (displayUrl !== img.thumbnail && img.thumbnail) {
                                                                 e.target.src = img.thumbnail;
                                                             } else {
-                                                                // Show placeholder if all fails
                                                                 e.target.style.display = 'none';
                                                                 e.target.parentElement.querySelector('.img-placeholder').style.display = 'flex';
                                                             }
@@ -1181,12 +1179,12 @@ const LookUpPage = () => {
                             </div>
 
                             {/* Platform Footprint */}
-                            {deepData.socials.length > 0 && (
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">🌐 Platform Footprint</h3>
-                                        <span className="category-count">{deepData.socials.length} Sources</span>
-                                    </div>
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">🌐 Platform Footprint</h3>
+                                    <span className="category-count">{deepData.socials.length} Sources</span>
+                                </div>
+                                {deepData.socials.length > 0 ? (
                                     <div className="social-grid">
                                         {deepData.socials.map((social, i) => (
                                             <div key={i} className="saas-card animate-scale-in" style={{ cursor: 'pointer' }} onClick={() => openPreview(social.url, social.platform, true)}>
@@ -1198,17 +1196,10 @@ const LookUpPage = () => {
                                             </div>
                                         ))}
                                     </div>
-                                </div>
-                            )}
-                            {deepData.socials.length === 0 && (
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">🌐 Platform Footprint</h3>
-                                        <span className="category-count">0 Sources</span>
-                                    </div>
+                                ) : (
                                     <div className="empty-state">No social media profiles found.</div>
-                                </div>
-                            )}
+                                )}
+                            </div>
 
                             {/* External Documents & Evidence */}
                             {deepData.externalDocuments && deepData.externalDocuments.length > 0 && (
@@ -1241,12 +1232,12 @@ const LookUpPage = () => {
                             )}
 
                             {/* Internal Archive */}
-                            {deepData.localData && deepData.localData.length > 0 && (
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">🗄️ Internal Archive Dossiers</h3>
-                                        <span className="category-count">{deepData.localData.length} Records</span>
-                                    </div>
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">🗄️ Internal Archive Dossiers</h3>
+                                    <span className="category-count">{deepData.localData?.length || 0} Records</span>
+                                </div>
+                                {deepData.localData && deepData.localData.length > 0 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
                                         {deepData.localData.map((item, idx) => (
                                             <div key={idx} className="archive-card animate-scale-in">
@@ -1260,17 +1251,10 @@ const LookUpPage = () => {
                                             </div>
                                         ))}
                                     </div>
-                                </div>
-                            )}
-                            {(!deepData.localData || deepData.localData.length === 0) && (
-                                <div className="category-section animate-fade-up">
-                                    <div className="category-header">
-                                        <h3 className="category-title">🗄️ Internal Archive Dossiers</h3>
-                                        <span className="category-count">0 Records</span>
-                                    </div>
+                                ) : (
                                     <div className="empty-state">No internal archive data available.</div>
-                                </div>
-                            )}
+                                )}
+                            </div>
 
                             {/* AI Synthesis */}
                             {deepData.person.aiSummary && (
@@ -1278,7 +1262,7 @@ const LookUpPage = () => {
                                     <div className="category-header">
                                         <h3 className="category-title">✨ AI Synthesis</h3>
                                     </div>
-                                    <div className="ai-summary-block prose" style={{ padding: '1.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', borderLeft: '4px solid var(--accent)', color: 'var(--text-main)', lineHeight: '1.6', fontSize: '1rem' }}>
+                                    <div className="ai-summary-block prose" style={{ padding: '1.5rem', background: 'var(--bg-subtle)', borderRadius: 'var(--radius-md)', borderLeft: 'none', color: 'var(--text-main)', lineHeight: '1.6', fontSize: '1rem' }}>
                                         <ReactMarkdown>{deepData.person.aiSummary}</ReactMarkdown>
                                     </div>
                                 </div>

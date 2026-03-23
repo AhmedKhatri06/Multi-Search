@@ -33,6 +33,12 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       7. Limit the list to top 20 candidates.
       8. If no candidates are found that match the criteria, return "No confident candidates found".
       
+      IDENTITY CONSOLIDATION (CRITICAL):
+      - If multiple search results (Wikipedia, LinkedIn, Twitter/X, Instagram, Facebook) clearly refer to the SAME individual, you MUST combine them into ONE candidate object.
+      - For well-known public figures, ALL discovered platform URLs should be listed in a "socials" array within that single candidate.
+      - Do NOT create separate candidate entries for the same person just because they appear on different platforms.
+      - Example: "Elon Musk" on Wikipedia, Twitter, and LinkedIn = ONE candidate with all three URLs, not three candidates.
+      
       EXCLUSION RULES (CRITICAL):
       - Do NOT create a candidate entry for individual social media POSTS, STATUSES, or TWEETS.
       - URLs containing "/posts/", "/status/", "/p/", "story.php", or titles like "... / Posts / X", "... on Facebook" are POSTS, not person profiles.
@@ -48,6 +54,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
           "location": "City, Country (if known)",
           "company": "Current organization",
           "url": "A primary social or profile URL",
+          "socials": [{"platform": "LinkedIn", "url": "..."}, {"platform": "Twitter", "url": "..."}],
           "confidence": "Low/Medium/High",
           "reasoning": "Briefly why this matches"
       }
@@ -57,6 +64,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       - Look for cross-platform clues (e.g. if a snippet mentions 'Twitter: @user', identify that user).
       - If name collisions are likely, use location/profession to filter.
       - Ensure results are actual human profiles, not organization pages.
+      - MERGE all platforms for the same person into one candidate with a combined socials array.
       
       Strictly return ONLY the JSON array. No markdown.
     `;
