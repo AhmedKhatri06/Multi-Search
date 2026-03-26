@@ -327,7 +327,7 @@ export async function performSearch(query, simpleMode = false) {
                 }
                 const knowledgeDomains = ['wikipedia.org', 'imdb.com/name', 'britannica.com', 'biography.com'];
                 const isKnowledge = knowledgeDomains.some(d => link.includes(d));
-                
+
                 if (isKnowledge) {
                     internetResults.push({
                         id: `knowledge-${index}`,
@@ -436,7 +436,7 @@ router.post("/identify", async (req, res) => {
         if (inputType === "NAME") {
             const profileSites = [
                 "site:linkedin.com/in/", "site:instagram.com", "site:facebook.com",
-                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/", 
+                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/",
                 "site:en.wikipedia.org", "site:imdb.com/name/"
             ].join(" OR ");
             internetQuery = `${name} ${location || ""} ${keywords || ""} (${profileSites})`.trim();
@@ -447,13 +447,13 @@ router.post("/identify", async (req, res) => {
         console.log(`[Identify] Executing parallel searches for: ${searchQuery}`);
 
         // 1. Parallel execution for local storage and internet
-        const [csvResults, sqliteResults, dbResults, internetRes] = await Promise.all([
+        const [csvResults, sqliteResults, dbResults, internetRes, instagramRes] = await Promise.all([
             searchCSVs(searchQuery, searchType).catch(e => { console.error("[CSV] err:", e.message); return []; }),
             Promise.resolve().then(() => sqliteSearch(searchQuery)).catch(e => { console.error("[SQLite] err:", e.message); return []; }),
             Document.find({ text: { $regex: searchQuery, $options: "i" } }).limit(10).lean().catch(e => { console.warn("[MongoDB] Identify failed:", e.message); return []; }),
             (async () => {
                 let sRes = await performSearch(internetQuery, true).catch(e => []);
-                
+
                 // Broaden search if very few results found for a likely high-profile name
                 if ((!sRes || sRes.length < 5) && inputType === "NAME") {
                     console.log(`[Identify] Few dorked results (${sRes?.length}). Triggering broad sweep fallback.`);
@@ -622,9 +622,9 @@ router.post("/identify", async (req, res) => {
                 // --- CONTRADICTION CHECKS (CRITICAL) ---
                 const normLoc = (candidate.location || "").toLowerCase().trim();
                 const existingLoc = (existing.location || "").toLowerCase().trim();
-                
+
                 // If locations exist and are different (at a city/country level), do NOT merge
-                const hasLocationContradiction = (normLoc && existingLoc) && 
+                const hasLocationContradiction = (normLoc && existingLoc) &&
                     !normLoc.includes(existingLoc) && !existingLoc.includes(normLoc);
 
                 // --- POSITIVE OVERLAP CHECKS ---
@@ -648,7 +648,7 @@ router.post("/identify", async (req, res) => {
                 // 1. Explicit overlap exists (Company, Email, or Phone)
                 // 2. OR one is a Knowledge Source (Wikipedia/IMDB) AND they don't have contradicting locations
                 // 3. OR both are from the same URL (platform profile consolidation)
-                
+
                 const sharedUrl = candidate.url && existing.socials?.some(s => s.url === candidate.url);
 
                 if (sharedUrl || sharedEmail || sharedPhone || companyMatch || (isKnowledgeSource && !hasLocationContradiction)) {
@@ -1017,11 +1017,11 @@ router.post("/deep", async (req, res) => {
         // --- NEW: Stage 1 Performance-Grade Discovery (Independent Proofing) ---
         console.log(`[Deep Search] Launching Technical Instagram Proofing for: ${name}...`);
         const technicalIgResults = await instagramService.identify(name, targetEmails[0], targetPhones[0]).catch(() => []);
-        
+
         technicalIgResults.forEach(ig => {
             const igUrl = ig.url.toLowerCase().replace(/\/$/, '');
             const existingIndex = instagramCandidates.findIndex(c => c.url.toLowerCase().replace(/\/$/, '') === igUrl);
-            
+
             if (existingIndex === -1 && ig.confidence >= 40) {
                 console.log(`  [IG Service] Found new technical candidate: ${ig.handle} (Confidence: ${ig.confidence})`);
                 instagramCandidates.push({
@@ -1045,7 +1045,7 @@ router.post("/deep", async (req, res) => {
         instagramCandidates.forEach(ig => {
             const igUrl = ig.url.toLowerCase().replace(/\/$/, '');
             const existingIndex = socialProfiles.findIndex(sp => sp.url.toLowerCase().replace(/\/$/, '') === igUrl);
-            
+
             if (existingIndex === -1 && ig.score >= 30) {
                 console.log(`  [Instagram Matcher] Found new candidate: ${ig.username} (Score: ${ig.score})`);
                 socialProfiles.push(ig);
@@ -1181,7 +1181,7 @@ router.post("/deep", async (req, res) => {
         });
 
         const refinedProfiles = (await Promise.all(refinementPromises)).filter(p => p !== null);
-        
+
         // HEURISTIC FALLBACK: If AI rejected everything, restore the original unrefined list
         // but mark them as unverified to prevent "Empty Results" for valid queries.
         if (refinedProfiles.length === 0 && socialProfiles.length > 0) {
@@ -1190,7 +1190,7 @@ router.post("/deep", async (req, res) => {
         } else {
             socialProfiles = refinedProfiles;
         }
-        
+
         console.log(`[Deep Search] AI Refinement complete. Final profiles: ${socialProfiles.length}`);
 
         // Cancellation Detection (moved early)
