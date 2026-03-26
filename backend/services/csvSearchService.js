@@ -16,9 +16,19 @@ export async function initCSVService() {
         return;
     }
 
-    const files = fs.readdirSync(SCRIPTS_DIR).filter(f => f.endsWith('.csv'));
+    const MAX_FILE_SIZE_MB = 2;
+    const files = fs.readdirSync(SCRIPTS_DIR).filter(file => {
+        if (!file.endsWith('.csv')) return false;
+        const stats = fs.statSync(path.join(SCRIPTS_DIR, file));
+        const fileSizeMB = stats.size / (1024 * 1024);
+        if (fileSizeMB > MAX_FILE_SIZE_MB) {
+            console.warn(`[CSV Search] Skipping ${file} (${fileSizeMB.toFixed(2)}MB) - exceeds limit.`);
+            return false;
+        }
+        return true;
+    });
 
-    console.log(`[CSV Search] Initializing in-memory cache for ${files.length} CSV files...`);
+    console.log(`[CSV Search] Initializing in-memory cache for ${files.length} valid CSV files...`);
 
     for (const file of files) {
         const filePath = path.join(SCRIPTS_DIR, file);

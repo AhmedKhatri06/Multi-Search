@@ -14,6 +14,7 @@ import { searchImages, calculateImageScore, searchWithDorks } from "../services/
 import { verifyFaceSimilarity, detectHumanFace, batchWithPacing } from "../services/faceVerification.js";
 import { generateDorks, generatePivotDorks, generateDocumentDorks } from "../services/dorkingService.js";
 import { matchInstagramProfiles } from "../services/instagramMatcher.js";
+import instagramService from "../services/instagramService.js";
 
 dotenv.config();
 
@@ -461,10 +462,24 @@ router.post("/identify", async (req, res) => {
                     sRes = [...(sRes || []), ...(broadRes || [])];
                 }
                 return sRes;
-            })()
+            })(),
+            instagramService.identify(name, null, number).catch(e => { console.error("[IG Service] err:", e.message); return []; })
         ]);
 
-        console.log(`[Identify] Results -> CSV: ${csvResults?.length || 0} | SQLite: ${sqliteResults?.length || 0} | Mongo: ${dbResults?.length || 0} | Internet: ${internetRes?.length || 0}`);
+        console.log(`[Identify] Results -> CSV: ${csvResults?.length || 0} | SQLite: ${sqliteResults?.length || 0} | Mongo: ${dbResults?.length || 0} | Internet: ${internetRes?.length || 0} | Instagram: ${instagramRes?.length || 0}`);
+
+        const igCandidates = (instagramRes || []).map(ig => ({
+            name: `${name} (@${ig.handle})`,
+            description: `Instagram Profile | ${ig.reason}`,
+            location: "Instagram",
+            company: keywords || "",
+            confidence: ig.confidence >= 90 ? "Verified" : (ig.confidence >= 40 ? "High" : "Medium"),
+            source: "internet",
+            type: "social",
+            url: ig.url,
+            identityScore: ig.confidence,
+            keywordMatched: keywords || ""
+        }));
 
         let mongoResults = dbResults || [];
         let searchResults = internetRes || [];
@@ -584,8 +599,8 @@ router.post("/identify", async (req, res) => {
         console.timeEnd("[AI] Identification Phase");
 
         // 3. Combine and Deduplicate (Robust Entity Resolution)
-        // Prioritize: Local > KnowledgeBase > InternetAI
-        const combined = [...localCandidates, ...knowledgeCandidates, ...internetCandidates];
+        // Prioritize: Local > KnowledgeBase > IG-Technical > InternetAI
+        const combined = [...localCandidates, ...knowledgeCandidates, ...igCandidates, ...internetCandidates];
         const mergedIdentities = new Map();
 
         combined.forEach(candidate => {
@@ -997,6 +1012,33 @@ router.post("/deep", async (req, res) => {
             company: person.company,
             location: cleanLocation,
             email: targetEmails[0] || ''
+        });
+
+        // --- NEW: Stage 1 Performance-Grade Discovery (Independent Proofing) ---
+        console.log(`[Deep Search] Launching Technical Instagram Proofing for: ${name}...`);
+        const technicalIgResults = await instagramService.identify(name, targetEmails[0], targetPhones[0]).catch(() => []);
+        
+        technicalIgResults.forEach(ig => {
+            const igUrl = ig.url.toLowerCase().replace(/\/$/, '');
+            const existingIndex = instagramCandidates.findIndex(c => c.url.toLowerCase().replace(/\/$/, '') === igUrl);
+            
+            if (existingIndex === -1 && ig.confidence >= 40) {
+                console.log(`  [IG Service] Found new technical candidate: ${ig.handle} (Confidence: ${ig.confidence})`);
+                instagramCandidates.push({
+                    username: ig.handle,
+                    fullName: name,
+                    bio: ig.reason,
+                    url: ig.url,
+                    score: ig.confidence,
+                    confidence: ig.confidence >= 90 ? 'High' : 'Medium',
+                    platform: 'Instagram'
+                });
+            } else if (existingIndex !== -1 && ig.confidence > instagramCandidates[existingIndex].score) {
+                console.log(`  [IG Service] Upgrading confidence for ${ig.handle} via technical proofing.`);
+                instagramCandidates[existingIndex].score = ig.confidence;
+                instagramCandidates[existingIndex].confidence = ig.confidence >= 90 ? 'High' : 'Medium';
+                instagramCandidates[existingIndex].bio = `${instagramCandidates[existingIndex].bio} | ${ig.reason}`;
+            }
         });
 
         // Merge Instagram candidates if they are higher confidence or missing
