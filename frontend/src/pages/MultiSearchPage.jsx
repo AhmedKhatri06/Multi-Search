@@ -115,7 +115,7 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
     );
 };
 
-const LookUpPage = () => {
+const MultiSearchPage = () => {
     // Workflow Stages
     const STAGES = {
         ENTRY: "ENTRY",
@@ -158,6 +158,7 @@ const LookUpPage = () => {
         return saved ? JSON.parse(saved) : null;
     });
     const [recent, setRecent] = useState([]);
+    const [showAllDocuments, setShowAllDocuments] = useState(false);
     const countryDropdownRef = useRef(null);
 
     useEffect(() => {
@@ -484,7 +485,7 @@ const LookUpPage = () => {
         }
     };
 
-    const handleIdentify = async (precisionData = null) => {
+    const handleIdentify = async (precisionData = null, isRefinement = false) => {
         // Cancel any pending search first
         cancelSearch();
         abortControllerRef.current = new AbortController();
@@ -528,7 +529,9 @@ const LookUpPage = () => {
                 body: JSON.stringify({
                     name: finalQuery,
                     keywords: precisionData?.keyword || "",
-                    number: precisionData?.number || ""
+                    location: precisionData?.location || "",
+                    number: precisionData?.number || "",
+                    isRefinement: !!isRefinement
                 }),
                 signal: abortControllerRef.current?.signal
             });
@@ -594,17 +597,50 @@ const LookUpPage = () => {
 
             const result = await res.json();
 
-            // Validate response before transitioning to Dashboard
+            // Validate response 
             if (!result || !result.person || !result.person.name) {
-                console.error("[Deep Search] Invalid response payload:", result);
+                console.warn("[Deep Search] Malformed response:", result);
                 setDeepData({ _error: true, person: { name: candidate.name || 'Unknown' }, socials: [], images: [], localData: [] });
                 setLoadProgress(100);
                 setStage(STAGES.DASHBOARD);
-            } else {
-                setDeepData(result);
-                setLoadProgress(100);
-                setStage(STAGES.DASHBOARD);
+                return;
             }
+
+            // PERMANENT STABILITY FIX: Transition to Dashboard immediately once Layer 1 is ready
+            setDeepData(result);
+            setLoadProgress(95);
+            setStage(STAGES.DASHBOARD);
+            setLoadProgress(100);
+
+            // PERMANENT STABILITY FIX: Layer 2 Verification (Background)
+            // We don't await this so the dashboard renders immediately
+            fetch(`${VITE_API_URL}/api/multi-search/verify`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ 
+                    person: result.person, 
+                    socials: result.socials, 
+                    allSearchItems: result.allSearchItems 
+                }),
+                signal: abortControllerRef.current?.signal
+            })
+            .then(res => res.json())
+            .then(verifyData => {
+                if (verifyData && verifyData.images) {
+                    setDeepData(prev => ({
+                        ...prev,
+                        images: verifyData.images, // Update with verified gallery
+                        person: {
+                            ...prev.person,
+                            aiSummary: verifyData.aiSummary, // Update with high-quality AI summary
+                            primaryImage: verifyData.primaryImage || prev.person.primaryImage
+                        }
+                    }));
+                }
+            })
+            .catch(err => {
+                console.warn("[Deep Search] Layer 2 Verification aborted/failed:", err.message);
+            });
 
             const updated = [candidate.name, ...recent.filter(r => r !== candidate.name)].slice(0, 5);
             setRecent(updated);
@@ -630,7 +666,7 @@ const LookUpPage = () => {
         if (!feedbackData.name) return;
 
         setShowFeedbackForm(false);
-        handleIdentify(feedbackData);
+        handleIdentify(feedbackData, true); // Pass true for isRefinement
     };
 
     const handleReset = () => {
@@ -1091,7 +1127,6 @@ const LookUpPage = () => {
                                         {deepData.person.location && <span className="location-pill">📍 {deepData.person.location}</span>}
                                     </div>
                                     <h1 className="profile-name">{deepData.person.name}</h1>
-                                    <p className="profile-subtitle">{deepData.person.description || "Intelligence Synthesis Target"}</p>
 
                                     <div className="profile-quick-links">
                                         {deepData.person.phoneNumbers?.length > 0 && (
@@ -1128,6 +1163,47 @@ const LookUpPage = () => {
 
                         {/* Intelligence Feed */}
                         <section className="results-feed">
+
+                            {/* Contact Intelligence Dashboard */}
+                            <div className="category-section animate-fade-up">
+                                <div className="category-header">
+                                    <h3 className="category-title">📇 Contact Intelligence Dashboard</h3>
+                                    <span className="category-count">Verified Identity Pins</span>
+                                </div>
+                                <div className="social-grid">
+                                    {(deepData.person.emails || []).map((email, i) => (
+                                        <div key={`email-${i}`} className="saas-card animate-scale-in" style={{ cursor: 'pointer' }} onClick={() => toggleReveal(email)}>
+                                            <div className="card-icon">✉️</div>
+                                            <div className="card-body">
+                                                <div className="card-meta">Enriched Email</div>
+                                                <div className="card-title" style={{ fontSize: '0.9rem' }}>
+                                                    {revealedNumbers.has(email) ? email : maskEmail(email)}
+                                                </div>
+                                                <div style={{ fontSize: '0.7rem', color: 'var(--accent)', marginTop: '4px', opacity: 0.8 }}>
+                                                    Source: {deepData.person.enrichmentRecord?.source || 'Public Identity Record'}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {(deepData.person.phoneNumbers || []).map((phone, i) => (
+                                        <div key={`phone-${i}`} className="saas-card animate-scale-in" style={{ cursor: 'pointer' }} onClick={() => toggleReveal(phone)}>
+                                            <div className="card-icon">📞</div>
+                                            <div className="card-body">
+                                                <div className="card-meta">Verified Phone</div>
+                                                <div className="card-title" style={{ fontSize: '0.9rem' }}>
+                                                    {revealedNumbers.has(phone) ? phone : maskPhone(phone)}
+                                                </div>
+                                                <div style={{ fontSize: '0.7rem', color: 'var(--accent)', marginTop: '4px', opacity: 0.8 }}>
+                                                    Validated Result
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {(!deepData.person.emails?.length && !deepData.person.phoneNumbers?.length) && (
+                                        <div className="empty-state">No direct contact data identified.</div>
+                                    )}
+                                </div>
+                            </div>
 
                             {/* Media Verification */}
                             <div className="category-section animate-fade-up">
@@ -1200,7 +1276,7 @@ const LookUpPage = () => {
                                         <span className="category-count">{deepData.externalDocuments.length} Findings</span>
                                     </div>
                                     <div className="social-grid">
-                                        {deepData.externalDocuments.map((doc, i) => (
+                                        {(showAllDocuments ? deepData.externalDocuments : deepData.externalDocuments.slice(0, 6)).map((doc, i) => (
                                             <div key={i} className="saas-card animate-scale-in" style={{ cursor: 'pointer' }} onClick={() => window.open(doc.url, '_blank')}>
                                                 <div className="card-icon">
                                                     {doc.platform === 'PDF' ? '📝' :
@@ -1219,8 +1295,20 @@ const LookUpPage = () => {
                                             </div>
                                         ))}
                                     </div>
+                                    {deepData.externalDocuments.length > 6 && (
+                                        <div style={{ marginTop: '1.5rem', textAlign: 'center' }}>
+                                            <button 
+                                                className="nav-btn secondary" 
+                                                onClick={() => setShowAllDocuments(!showAllDocuments)}
+                                                style={{ padding: '0.6rem 2rem', fontSize: '0.9rem' }}
+                                            >
+                                                {showAllDocuments ? "Show Less" : "More Information"}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             )}
+
 
                             {/* Internal Archive */}
                             <div className="category-section animate-fade-up">
@@ -1383,4 +1471,4 @@ const LookUpPage = () => {
     );
 };
 
-export default LookUpPage;
+export default MultiSearchPage;

@@ -15,6 +15,7 @@ import nexaSearchRoute from "./routes/nexaSearch.js";
 import proxyRoute from "./routes/proxy.js";
 import previewRoute from "./routes/preview.js";
 import authRoute from "./routes/auth.js";
+import enrichRoute from "./routes/enrich.js";
 import { initCSVService } from "./services/csvSearchService.js";
 const app = express();
 const port = process.env.PORT || 5000;
@@ -36,6 +37,7 @@ app.use("/api/nexa-search", nexaSearchRoute);
 app.use("/api/proxy", proxyRoute);
 app.use("/api/preview", previewRoute);
 app.use("/api/auth", authRoute);
+app.use("/api/enrich", enrichRoute);
 app.use("/images", express.static(path.join(process.cwd(), "images")));
 app.use("/api/search/internet", internetSearch);
 app.get("/", (req, res) => {

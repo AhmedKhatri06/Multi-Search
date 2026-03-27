@@ -12,6 +12,8 @@ const IG_SIG_KEY_VERSION = '4';
  * Service to handle Instagram discovery and technical proofing (mask matching).
  * Replicates the logic of 'yesitsme' for product-level integration.
  */
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 class InstagramService {
   /**
    * Generates a signed body for Instagram internal API requests.
@@ -124,26 +126,35 @@ class InstagramService {
   }
 
   /**
-   * Full discovery flow for a name and optional contact info.
+   * Full discovery flow for a name and optional contact info (emails/phones).
    */
-  async identify(name, email, phone) {
-    const sessionId = process.env.IG_SESSION_ID;
-    if (!sessionId) {
-      console.warn('[IG Service] No IG_SESSION_ID found in .env');
+  async identify(name, emails = [], phones = []) {
+    const sessionIds = (process.env.IG_SESSION_IDS || process.env.IG_SESSION_ID || "").split(/[\s,]+/).filter(id => id.length > 5);
+    
+    if (sessionIds.length === 0) {
+      console.warn('[IG Service] No IG_SESSION_IDS found in .env. Discovery will be limited.');
     }
+
+    // Ensure inputs are arrays
+    const emailList = Array.isArray(emails) ? emails : (emails ? [emails] : []);
+    const phoneList = Array.isArray(phones) ? phones : (phones ? [phones] : []);
 
     const handles = await this.searchHandles(name);
     const results = [];
 
     for (const handle of handles.slice(0, 5)) { // Limit to top 5 candidates for speed
-      const info = await this.getMaskedInfo(handle, sessionId);
+      // PERMANENT STABILITY FIX: Session Rotation
+      const currentSession = sessionIds[Math.floor(Math.random() * sessionIds.length)];
+      
+      const info = await this.getMaskedInfo(handle, currentSession);
+      await sleep(500); // Pacing to avoid blocks
       
       let confidence = 0;
       let reason = 'Name match only';
 
       if (info) {
-        const emailMatch = email && info.email_mask && this.isMaskMatch(email, info.email_mask);
-        const phoneMatch = phone && info.phone_mask && this.isMaskMatch(phone, info.phone_mask);
+        const emailMatch = emailList.some(email => info.email_mask && this.isMaskMatch(email, info.email_mask));
+        const phoneMatch = phoneList.some(phone => info.phone_mask && this.isMaskMatch(phone, info.phone_mask));
 
         if (emailMatch || phoneMatch) {
           confidence = 90;

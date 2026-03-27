@@ -100,16 +100,20 @@ ${JSON.stringify(searchResults, null, 2)}
             return [];
         }
 
-        try {
-            const parsed = JSON.parse(text);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (e) {
-            console.error("Failed to parse AI response as JSON:", text);
-            return [];
+        const jsonMatch = text.match(/\[\s*\{.*\}\s*\]/s);
+        if (jsonMatch) {
+            try {
+                const parsed = JSON.parse(jsonMatch[0]);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                console.error("Failed to parse regex-extracted JSON:", jsonMatch[0]);
+            }
         }
+
+        console.error("No JSON array found in AI response:", text);
+        return [];
     } catch (error) {
         console.error("AI Service Error (Hang/Timeout/Failure):", error.message);
-        // Return empty array on timeout to allow search to proceed with local/raw results
         return [];
     }
 };
