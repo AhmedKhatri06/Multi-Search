@@ -13,19 +13,41 @@ async function findDomain(company) {
     if (!company || company.length < 2) return null;
     
     // Check if company already looks like a domain
-    if (company.includes('.') && !company.includes(' ')) return company;
+    if (company.includes('.') && !company.includes(' ')) return company.toLowerCase().trim();
 
-    console.log(`[Enrich] Discovering domain for: ${company.slice(0, 100)}...`);
-    const cleanCompany = company.split(/[(),|]/)[0].trim().slice(0, 64);
-    const results = await performSearch(`${cleanCompany} official website`, true).catch(() => []);
+    console.log(`[Enrich] Discovering domain for company: ${company.slice(0, 100)}...`);
+    
+    // CLEANSE: Remove generic role information if it leaked into the company field
+    // e.g. "Atharva Auti - Cybersecurity" -> "Atharva Auti" (still likely not a company)
+    // e.g. "Software Engineer at Google" -> "Google" (Better)
+    let cleanCompany = company;
+    if (company.toLowerCase().includes(' at ')) {
+        const parts = company.split(/ at /i);
+        cleanCompany = parts[parts.length - 1] || company;
+    }
+    
+    // TIGHTENING: Block generic enrichment stopwords that pollute domain discovery
+    const stopwords = ['site', 'official', 'website', 'domain', 'google', 'search', 'bing', 'yahoo', 'profile', 'profile:', 'view', 'linkedin', 'instagram', 'facebook'];
+    cleanCompany = cleanCompany.split(' ')
+        .filter(word => !stopwords.includes(word.toLowerCase().replace(/[:]/g, "")))
+        .join(' ');
+
+    cleanCompany = cleanCompany.split(/[(),-|]/)[0].trim().slice(0, 64);
+    if (!cleanCompany || cleanCompany.length < 2) return null;
+
+    const results = await performSearch(`${cleanCompany} official website domain`, true).catch(() => []);
     if (results && results.length > 0) {
-        // Look for the first clean corporate link
+        // Look for the first clean corporate link, avoiding common consumer/social sites 
+        // that pollute general company searches.
+        const forbidden = ['linkedin.com', 'facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'crunchbase.com', 'zoominfo.com', 'glassdoor.com'];
+        
         for (const res of results) {
             const url = res.url || res.link || "";
-            if (url.includes('linkedin.com') || url.includes('facebook.com') || url.includes('instagram.com')) continue;
+            if (forbidden.some(f => url.includes(f))) continue;
+            
             try {
                 const domain = new URL(url).hostname.replace('www.', '');
-                if (domain && domain.includes('.')) return domain;
+                if (domain && domain.includes('.') && !domain.includes('google.com')) return domain;
             } catch (e) {}
         }
     }
@@ -35,10 +57,33 @@ async function findDomain(company) {
 /**
  * Main enrichment orchestration engine.
  */
-export async function enrichContact(name, company, domain = null) {
+export async function enrichContact(name, company, domain = null, socialProfiles = []) {
     let activeDomain = domain;
-    if (!activeDomain && company) {
-        activeDomain = await findDomain(company);
+    let activeCompany = company;
+
+    // 1. IMPROVED ANCHORING: If no company, but we have a LinkedIn profile, extract company from title
+    if (!activeCompany && socialProfiles && socialProfiles.length > 0) {
+        const li = socialProfiles.find(p => p.platform === 'linkedin');
+        if (li && li.title) {
+            const title = li.title.toLowerCase();
+            let extracted = null;
+            
+            // Handle multiple separators: "at", "@", "|", "—"
+            if (title.includes(' at ')) extracted = li.title.split(/ at /i)[1];
+            else if (title.includes(' @ ')) extracted = li.title.split(' @ ')[1];
+            else if (title.includes(' | ')) extracted = li.title.split(' | ')[1];
+            else if (title.includes(' — ')) extracted = li.title.split(' — ')[1];
+            
+            if (extracted) {
+                const cleanExtracted = extracted.split(/[|(),]/)[0].trim();
+                console.log(`[Enrich] Anchored to company from LinkedIn: ${cleanExtracted}`);
+                activeCompany = cleanExtracted;
+            }
+        }
+    }
+
+    if (!activeDomain && activeCompany) {
+        activeDomain = await findDomain(activeCompany);
     }
 
     if (!activeDomain) {
@@ -75,10 +120,16 @@ export async function enrichContact(name, company, domain = null) {
 
     // 3. Free Layer: OSINT / Public Signals (Cost: 0) — runs REGARDLESS of domain
     // This is the critical path for individuals without corporate domains.
+    const allEmails = [];
+    const allPhones = [];
+
     if (maxScore < 70) {
         console.log(`[Enrich] Searching public signals for ${name}...`);
-        const publicEmails = await searchPublicSignals(name, company, activeDomain);
-        for (const email of publicEmails) {
+        const publicSignals = await searchPublicSignals(name, company, activeDomain);
+        
+        // Handle Emails
+        for (const email of publicSignals.emails) {
+            allEmails.push(email);
             const v = await validateEmail(email);
             if (v.valid) {
                 const score = v.mx ? 70 : 50;
@@ -91,6 +142,19 @@ export async function enrichContact(name, company, domain = null) {
                         verificationStatus: v.mx ? 'verified' : 'found'
                     };
                 }
+            }
+        }
+
+        // Handle Phones (OSINT discovered)
+        for (const phone of publicSignals.phones) {
+            allPhones.push(phone);
+            if (maxScore < 50) {
+                bestResult = {
+                    ...bestResult,
+                    phone,
+                    confidence: 50,
+                    source: 'Public OSINT Signal'
+                };
             }
         }
     }
@@ -128,15 +192,23 @@ export async function enrichContact(name, company, domain = null) {
         console.log(`[Enrich] No domain available for provider waterfall. Relying on OSINT results.`);
     }
 
-    if (bestResult && (bestResult.verificationStatus === 'verified' || (bestResult.confidence >= 70))) {
-        return bestResult;
-    }
+    // Placeholder Check: Never return synthetic data
+    const isPlaceholder = (e) => {
+        if (!e) return true;
+        const v = e.toLowerCase().trim();
+        return v.includes('noemail.com') || v.includes('example.com') || v.includes('test.com');
+    };
+
+    // SOFTENED: Lowered threshold from 70 to 50 to allow "Probable" OSINT signals to show.
+    // CONSOLDIDATION: Always return the full signal list, even if no 'Best' single result is found
+    const finalResult = bestResult && (bestResult.email || bestResult.phone) && !isPlaceholder(bestResult.email) && (bestResult.verificationStatus === 'verified' || (bestResult.confidence >= 50))
+        ? { ...bestResult }
+        : { email: null, phone: null, source: 'Not Found', confidence: 0, verificationStatus: 'not_found' };
 
     return {
-        email: null,
-        source: 'Not Found',
-        confidence: 0,
-        verificationStatus: 'not_found'
+        ...finalResult,
+        emails: [...new Set([...allEmails, ...(finalResult.email ? [finalResult.email] : [])])],
+        phones: [...new Set([...allPhones, ...(finalResult.phone ? [finalResult.phone] : [])])]
     };
 }
 

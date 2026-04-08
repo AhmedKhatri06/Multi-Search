@@ -10,20 +10,24 @@ export async function enrichWithApollo(name, domain) {
     try {
         const response = await axios.post('https://api.apollo.io/v1/people/match', {
             full_name: name,
-            domain: domain,
-            api_key: apiKey
+            domain: domain
         }, {
+            headers: {
+                'X-Api-Key': apiKey,
+                'Content-Type': 'application/json'
+            },
             timeout: 10000
         });
 
         const person = response.data?.person;
-        if (!person || !person.email) return null;
+        if (!person) return null;
 
         return {
-            email: person.email,
+            email: person.email || null,
+            phone: person.phone_number || person.sanitized_phone || null,
             source: 'Apollo.io',
-            confidence: 90, // Apollo is generally high confidence if it finds a match
-            verificationStatus: person.email_status || 'verified'
+            confidence: 90,
+            verificationStatus: person.email_status || (person.email ? 'verified' : 'not_found')
         };
     } catch (err) {
         console.error('[Apollo] Enrichment failed:', err.response?.data || err.message);

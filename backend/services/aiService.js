@@ -34,9 +34,10 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       7. Limit the list to top 12 candidates.
       
       IDENTITY CONSOLIDATION (SELECTIVE):
-      - ONLY combine results into ONE candidate if they refer to the EXACT SAME individual (e.g., same LinkedIn + same personal website + matching bio).
-      - If one result says "Software Engineer at Google" and another says "Student at University", do NOT merge them unless there is explicit career trajectory evidence. Default to treating them as DIFFERENT people.
-      - Rule of Thumb: If you aren't 90% sure they are the same person, list them as DISTINCT candidates.
+      - ONLY combine results into ONE candidate if they refer to the EXACT SAME individual.
+      - **DOMAIN COLLISION (CRITICAL)**: If you find two people with the same name but DIFFERENT companies, professional roles, or industries (e.g. 'Software Engineer at Google' vs 'Director at a Hospital'), you MUST return them as separate objects.
+      - **DO NOT** combine their descriptions into one string with a separator like '|' or '/'. This is a failure of disambiguation.
+      - Rule of Thumb: If you aren't 95% sure they are the same person (e.g., matching LinkedIn and matching personal site context), list them as DISTINCT candidates.
       
       EXCLUSION RULES:
       - Do NOT create candidates for individual social media POSTS/STATUSES.
@@ -47,24 +48,23 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       Each object MUST have:
       {
           "name": "Strict Name Only (e.g. Sundar Pichai. NO titles like CEO or Dr.)",
-          "description": "Short profession/role summary (e.g. CEO of Google)",
+          "description": "EXTREMELY CONCISE tagline (Maximum 4-5 words. e.g. 'CEO at Google' or 'Student at Stanford')",
           "location": "City, Country (if known)",
-          "company": "Current organization",
+          "company": "Current organization (1-2 words. Be specific, e.g. 'CyHEX' or 'Credit Suisse')",
           "url": "A primary social or profile URL",
           "socials": [{"platform": "LinkedIn", "url": "..."}, {"platform": "Twitter", "url": "..."}],
           "confidence": "Low/Medium/High",
-          "reasoning": "Explain why this is a distinct persona from others"
+          "reasoning": "Quick reason why this is a distinct persona"
       }
       
       IDENTITY INTEGRITY RULES:
+      - **SURNAME INTEGRITY (CRITICAL)**: For names like 'Mihir Doshi', do NOT include results for 'Mihir Desai'. A surname mismatch is a completely different person.
       - "name": MUST be ONLY the person's full name. 
-      - "name": NEVER include professional titles, separators (:, -), or company names.
-      - "name": If the name is "Sundar Pichai: Google CEO", the extracted name MUST be "Sundar Pichai".
-      - "description": This is where you put the title and company details.
+      - "description": Keep it extremely concise. 4-5 words maximum. Do NOT string multiple roles together.
       
       Strategy: 
+      - Use exact surname matching to distinguish between people with the same first name.
       - Prioritize profile links over news articles.
-      - Use location and profession to distinguish between people with the same name.
       - Strictly return ONLY the JSON array. No markdown.
     `;
 
@@ -88,8 +88,8 @@ ${JSON.stringify(searchResults, null, 2)}
                 { role: "system", content: systemPrompt },
                 { role: "user", content: prompt }
             ],
-            model: "llama-3.1-8b-instant",
-            temperature: 0.3,
+            model: "llama-3.3-70b-versatile",
+            temperature: 0.1, // Lower temperature for stricter disambiguation
         });
 
         // Race the Groq call against a 25s timeout
@@ -110,7 +110,33 @@ ${JSON.stringify(searchResults, null, 2)}
         if (jsonMatch) {
             try {
                 const parsed = JSON.parse(jsonMatch[0]);
-                return Array.isArray(parsed) ? parsed : [];
+                const candidates = Array.isArray(parsed) ? parsed : [];
+                
+                // --- STRUCTURAL DISAMBIGUATION: Check for 'Merged' candidates ---
+                const finalizedCandidates = [];
+                candidates.forEach(c => {
+                    const desc = (c.description || "").toLowerCase();
+                    // Detect common "Merger" patterns like pipes, slashes, or double company mentions
+                    const hasMergerPattern = desc.includes('|') || desc.includes('/') || (desc.includes(' and ') && desc.split(' and ').length > 1 && desc.includes(' at '));
+                    
+                    if (hasMergerPattern && (c.socials?.length > 1 || desc.length > 50)) {
+                        console.log(`[AI Discovery] Merged candidate detected: ${c.name}. Splitting...`);
+                        const parts = c.description.split(/[|/]/).map(p => p.trim());
+                        parts.forEach((p, idx) => {
+                            finalizedCandidates.push({
+                                ...c,
+                                description: p,
+                                company: p.split(/ at /i)[1]?.trim() || c.company,
+                                url: c.socials?.[idx]?.url || c.url,
+                                reasoning: `Divergent identity split: ${p} (Original: ${c.description})`
+                            });
+                        });
+                    } else {
+                        finalizedCandidates.push(c);
+                    }
+                });
+                
+                return finalizedCandidates;
             } catch (e) {
                 console.error("Failed to parse regex-extracted JSON:", jsonMatch[0]);
             }
@@ -131,20 +157,16 @@ ${JSON.stringify(searchResults, null, 2)}
  * @returns {Promise<string>}
  */
 export const generateText = async (prompt) => {
-    const SUMMARY_SYSTEM_PROMPT = `You are a senior intelligence research analyst producing professional dossier summaries.
-
-Your task is to synthesize all available data into a comprehensive, structured profile summary.
-
-GUIDELINES:
-- Write 150-200 words organized into 2-3 focused paragraphs.
-- Paragraph 1: Professional identity — role, company, industry, and career trajectory.
-- Paragraph 2: Digital presence — notable platforms, public activity, and professional networks.
-- Paragraph 3 (if data supports): Key findings — awards, publications, affiliations, or unique intelligence.
-- FORMATTING: Use **bolding** for names, companies, and key roles. Use bullet points for specific achievements or highlights. Use clear headers if necessary.
-- Use specific facts from the data. Never fabricate details not present in the source material.
-- Reference data sources naturally (e.g., "LinkedIn presence indicates...", "Public records suggest...").
-- Maintain a neutral, analytical tone. No filler phrases like "Based on available data" at the start.
-- If data is sparse, write a shorter but still substantive summary. Do not pad with generic text.`;
+    const SUMMARY_SYSTEM_PROMPT = `You are an expert identity intelligence analyst. Your goal is to synthesize multiple data points into a high-quality, professional executive summary for an individual's dossier.
+    
+    GUIDELINES:
+    1. **SYNTHESIS OVER REPETITION**: Do not simply list or copy-paste raw data from the sources. Connect the dots to explain WHO the person is, their professional trajectory, and their key areas of expertise.
+    2. **NATURAL LANGUAGE**: Use a sophisticated, professional tone. Avoid starting with lists.
+    3. **STRUCTURE**:
+       - Paragraph 1: Core professional identity, current leadership role, and primary industry impact.
+       - Paragraph 2: Notable achievements, digital footprint, or academic/professional milestones found across the web.
+    4. **VISUAL CLARITY**: Use **bolding** for for names, key companies, and significant technologies.
+    5. **CLEAN OUTPUT**: Do not include any meta-tags like /human or /summary in the final output.`;
 
     // --- Try Ollama first (local, free, unlimited) ---
     try {
@@ -212,8 +234,10 @@ export const verifyIdentityMatch = async ({ targetName, targetContext, candidate
       NAME COLLISION DETECTION (CRITICAL):
       - Many people share the same name. A name match alone is NOT sufficient.
       - If the candidate's bio/snippet mentions a DIFFERENT company, role, or industry than the Target's context, it is likely a DIFFERENT person.
+      - **HANDLE CORRELATION (NEW)**: If the URL handle (e.g., @elonmusk, @sundarpichai) strongly matches the target name, be more lenient with snippet context. High-profile, established handles are rarely duplicates.
+      - **OFFICIAL MARKERS**: If the candidate title or snippet uses terms like "Official", "Verified", "CEO", "Founder", or "Profile", it is more likely to be a match for a high-profile target.
+      - Rule: If the handles match and the name matches, but professional keywords are missing in the brief snippet, score ABOVE 80 (Identity Probable).
       - If the Target context mentions "Company A" but the Candidate's snippet mentions "Company B" with no overlap, score BELOW 30.
-      - Social media profiles with matching names but no professional context overlap should score BELOW 40.
       
       OUTPUT FORMAT (JSON ONLY):
       {

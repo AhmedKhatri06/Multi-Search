@@ -8,6 +8,18 @@ import { identifyPeople, generateText, verifyIdentityMatch } from "../services/a
 import { extractSocialAccounts, supportedPlatformDomains } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
 import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName } from "../utils/searchHelper.js";
+
+// Helper: Identify synthetic/placeholder data patterns that should NEVER be used for merging or displayed as 'Verified'
+function isPlaceholder(value) {
+    if (!value) return true;
+    const v = value.toLowerCase().trim();
+    return v.includes('noemail.com') || 
+           v.includes('example.com') || 
+           v.includes('test.com') ||
+           v.startsWith('+00') || 
+           v === 'not found' || 
+           v === 'unknown';
+}
 import { searchCSVs } from "../services/csvSearchService.js";
 import { searchImages, calculateImageScore, searchWithDorks } from "../services/internetSearch.js";
 import { verifyFaceSimilarity, detectHumanFace, batchWithPacing } from "../services/faceVerification.js";
@@ -59,6 +71,48 @@ function normalize(value = "") {
 }
 
 /**
+ * Validate if an external document/evidence (PDF, Doc) truly belongs to the target.
+ */
+function validateEvidence(item, targetName, context = {}) {
+    const title = (item.title || "").toLowerCase();
+    const snippet = (item.snippet || "").toLowerCase();
+    const text = (item.text || "").toLowerCase();
+    const combined = `${title} ${snippet} ${text}`;
+    
+    const nameLower = targetName.toLowerCase();
+    const nameParts = nameLower.split(/\s+/).filter(p => p.length > 2);
+    
+    // 1. Full Name Requirement: Must have at least First + Last anywhere in the doc metadata
+    const matchesAll = nameParts.every(part => combined.includes(part));
+    
+    // 2. Strict Collision Protection: If it's a DIFFERENT person with the same first name
+    // e.g. "Atharva Narmale" in "Atharva Auti" search
+    if (nameParts.length >= 2) {
+        const firstName = nameParts[0];
+        const surname = nameParts[nameParts.length - 1];
+        
+        // If it matches first name but has a DIFFERENT surname in a prominent position
+        const surnameRegex = new RegExp(`\\b${firstName}\\s+([a-zA-Z]+)`, 'gi');
+        let m;
+        while ((m = surnameRegex.exec(combined)) !== null) {
+            const foundSurname = m[1].toLowerCase();
+            if (foundSurname !== surname && foundSurname.length > 3) {
+                console.log(`  [Evidence Reject] Surname Collision: Found "${firstName} ${foundSurname}" instead of "${targetName}"`);
+                return false;
+            }
+        }
+    }
+
+    if (matchesAll) return true;
+
+    // 3. Fallback: Matches some name parts + matching company/location
+    const markers = [context.location, context.keywords, context.profession].filter(Boolean);
+    const hasContextMatch = markers.some(m => combined.includes(m.toLowerCase()));
+    
+    return nameParts.some(part => combined.includes(part)) && hasContextMatch;
+}
+
+/**
  * Sanitizes search queries to remove special characters that trigger Serper 400 errors.
  */
 function sanitizeQuery(str = "") {
@@ -69,8 +123,8 @@ function sanitizeQuery(str = "") {
     const cleaned = str.split(/[:;]/)[0].trim();
 
     return cleaned
-        .replace(/[\-,"'()]/g, " ") // Replace remaining special chars with space
-        .replace(/\s+/g, " ")        // Normalize spaces
+        .replace(/[\-,'()]/g, " ") // Replace remaining special chars with space (PRESERVING QUOTES)
+        .replace(/\s+/g, " ")      // Normalize spaces
         .trim();
 }
 
@@ -103,6 +157,21 @@ function rankResults(results, query, context = null) {
             // 3. Entity Priority (Source Reliability)
             score += (4 - item.priority) * 10;
             
+            // 4. Primary Source Boost (LinkedIn)
+            if (item.provider === "LinkedIn") {
+                const handle = (item.link || "").toLowerCase().split("/in/")[1]?.split("/")[0] || "";
+                const matchesHandle = q.split(" ").some(part => handle.includes(part));
+                const matchesTitle = q.split(" ").every(part => title.includes(part));
+                
+                // Only grant professional boost if there's high correlation
+                // Prevents unrelated candidates (e.g. news reporters) from outranking based on mentions
+                if (matchesHandle || matchesTitle) {
+                    score += 30; 
+                } else {
+                    score -= 20; // Penalize coincidental profile matches
+                }
+            }
+
             if (item.source === "Internet") {
                 score += 5;
             }
@@ -149,8 +218,85 @@ export async function searchWikipedia(query) {
     return null;
 }
 
-export async function performSearch(query, simpleMode = false, identityContext = null, isRefinement = false) {
-    const internetQuery = sanitizeQuery(query);
+/**
+ * Helper: Build safe, short Serper queries to avoid 400 errors.
+ * Limits complexity to 3 sites and query length to ~200 chars.
+ */
+function buildSafeBuckets(baseQuery, domains, maxSites = 3) {
+    const buckets = [];
+    let currentBucket = [];
+    
+    // TIGHTENING: Strip all existing double-quotes before wrapping to avoid ""Name"" errors
+    const cleanBase = baseQuery.replace(/"/g, "").trim();
+
+    for (const domain of domains) {
+        const potentialBucket = [...currentBucket, domain];
+        // SYNTAX FIX: No parentheses for single-site query
+        const siteFilter = potentialBucket.length > 1
+            ? `(${potentialBucket.map(d => `site:${d}`).join(" OR ")})`
+            : `site:${potentialBucket[0]}`;
+        const fullQuery = `"${cleanBase}" ${siteFilter}`;
+        
+        // BUFFER: Lowered threshold from 200 to 180 for safer URL encoding
+        if (currentBucket.length < maxSites && fullQuery.length < 180) {
+            currentBucket.push(domain);
+        } else {
+            if (currentBucket.length > 0) buckets.push(currentBucket);
+            currentBucket = [domain];
+        }
+    }
+    if (currentBucket.length > 0) buckets.push(currentBucket);
+    return buckets;
+}
+
+/**
+ * Helper: Execution wrapper for Serper with automatic 400-retry split.
+ */
+async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = false) {
+    // TIGHTENING: Strip local quotes
+    const cleanBase = baseQuery.replace(/"/g, "").trim();
+    // SYNTAX FIX: No parentheses for single-domain queries
+    const siteFilter = domains.length > 1
+        ? `(${domains.map(d => `site:${d}`).join(" OR ")})`
+        : `site:${domains[0]}`;
+    const q = `"${cleanBase}" ${siteFilter}`.trim();
+    
+    // DIAGNOSTICS: Unique label for concurrency tracing
+    const requestId = Math.random().toString(36).slice(-4);
+    const label = `[Serper] Bucket (${domains.length} sites): ${requestId}`;
+
+    try {
+        console.time(label);
+        const response = await axios.post("https://google.serper.dev/search", { q, num }, {
+            headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
+            timeout: 30000
+        });
+        console.timeEnd(label);
+        return response.data?.organic || [];
+    } catch (err) {
+        console.timeEnd(label);
+        // RETRY LOGIC: If 400 Bad Request (Length/Complexity), split and retry
+        if (err.response?.status === 400 && domains.length > 1) {
+            console.warn(`[Serper] Query rejected (400). Splitting bucket of ${domains.length} [ref:${requestId}]...`);
+            const mid = Math.ceil(domains.length / 2);
+            const left = domains.slice(0, mid);
+            const right = domains.slice(mid);
+            
+            const [res1, res2] = await Promise.all([
+                performSafeSerperSearch(baseQuery, left, num, isRefinement),
+                performSafeSerperSearch(baseQuery, right, num, isRefinement)
+            ]);
+            return [...res1, ...res2];
+        }
+        
+        console.error(`[Serper] Search failed: ${err.message} | Query: ${q}`);
+        return [];
+    }
+}
+
+export async function performSearch(query, simpleMode = false, identityContext = null, isRefinement = false, options = {}) {
+    const { skipLocal = false } = options;
+    let internetQuery = sanitizeQuery(query);
     const imageQuery = sanitizeQuery(query);
     const fallbackImageQuery = sanitizeQuery(query);
     const targetName = identityContext?.name || "";
@@ -183,32 +329,37 @@ export async function performSearch(query, simpleMode = false, identityContext =
     }
     const context = queryWords.length > 2 ? queryWords.slice(2).join(" ") : "";
 
+    // Local Result fetching (Conditional)
     let mongoResults = [];
-    try {
-        mongoResults = await Document.find({
-            text: { $regex: localSearchQuery, $options: "i" }
-        }).lean();
-    } catch (dbErr) {
-        console.warn("[MongoDB] Search failed (check MONGO_URI):", dbErr.message);
-    }
+    let sqliteResults = [];
 
-    let sqliteResults = sqliteSearch(localSearchQuery);
+    if (!skipLocal) {
+        try {
+            mongoResults = await Document.find({
+                text: { $regex: localSearchQuery, $options: "i" }
+            }).lean();
+        } catch (dbErr) {
+            console.warn("[MongoDB] Search failed (check MONGO_URI):", dbErr.message);
+        }
 
-    // 2. Fallback: Keyword search
-    if (mongoResults.length === 0 && queryWords.length >= 2) {
-        const nameGuess = queryWords.slice(0, 2).join(" ");
-        mongoResults = await Document.find({
-            text: { $regex: nameGuess, $options: "i" }
-        }).lean();
-    }
+        sqliteResults = sqliteSearch(localSearchQuery);
 
-    // 3. Deeper Fallback
-    if (mongoResults.length === 0 && queryWords.length > 0) {
-        mongoResults = await Document.find({
-            $and: queryWords.slice(0, 3).map(word => ({
-                text: { $regex: word, $options: "i" }
-            }))
-        }).lean();
+        // 2. Fallback: Keyword search
+        if (mongoResults.length === 0 && queryWords.length >= 2) {
+            const nameGuess = queryWords.slice(0, 2).join(" ");
+            mongoResults = await Document.find({
+                text: { $regex: nameGuess, $options: "i" }
+            }).lean();
+        }
+
+        // 3. Deeper Fallback
+        if (mongoResults.length === 0 && queryWords.length > 0) {
+            mongoResults = await Document.find({
+                $and: queryWords.slice(0, 3).map(word => ({
+                    text: { $regex: word, $options: "i" }
+                }))
+            }).lean();
+        }
     }
 
     internetQuery = sanitizeQuery(query);
@@ -216,8 +367,8 @@ export async function performSearch(query, simpleMode = false, identityContext =
         const p = sqliteResults[0];
         const parts = (p.text || "").split(" - ");
         const rowName = parts[0]?.trim() || "";
-        const rowTitle = parts.slice(1).join(" - ").trim() || "";
-        internetQuery = sanitizeQuery(`${rowName} ${rowTitle}`) || sanitizeQuery(query);
+        // Simplified: Stop using rowTitle (descriptions) in Serper queries to avoid restrictive results and timeouts
+        internetQuery = sanitizeQuery(rowName) || sanitizeQuery(query);
     }
 
     // REAL INTERNET SEARCH – SERPAPI
@@ -225,56 +376,62 @@ export async function performSearch(query, simpleMode = false, identityContext =
     let internetResults = [];
     try {
         if (!simpleMode) {
-            // Split domains into two buckets to avoid query length overflow (400 Errors)
-            const half = Math.ceil(supportedPlatformDomains.length / 2);
-            const bucket1 = supportedPlatformDomains.slice(0, half);
-            const bucket2 = supportedPlatformDomains.slice(half);
+            // RE-ARCHITECTURE: Dynamic Safe Bucketing
+            // 1. Prioritize Gold Domains
+            const goldDomains = ['linkedin.com/in/', 'en.wikipedia.org', 'twitter.com', 'x.com', 'instagram.com', 'facebook.com'];
+            const otherDomains = supportedPlatformDomains.filter(d => !goldDomains.includes(d));
 
-            const q1 = `${internetQuery} (${bucket1.map(d => `site:${d}`).join(" OR ")})`.trim();
-            const q2 = `${internetQuery} (${bucket2.map(d => `site:${d}`).join(" OR ")})`.trim();
+            // 2. Build Safe Clusters (Max 3 sites / <200 chars)
+            const goldBuckets = buildSafeBuckets(internetQuery, goldDomains, 3);
+            const otherBuckets = buildSafeBuckets(internetQuery, otherDomains, 3);
+            
+            console.log(`[Serper] Parallel Discovery: Executing ${goldBuckets.length} Gold and ${otherBuckets.length} Silver buckets...`);
 
-            console.log(`[Serper] Branching Parallel Queries (Adaptive Mode)`);
-            const [resp1, resp2] = await Promise.all([
-                axios.post("https://google.serper.dev/search", { q: q1, num: isRefinement ? 50 : 30 }, {
-                    headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
-                    timeout: 12000
-                }).catch(e => ({ data: { organic: [] } })),
-                axios.post("https://google.serper.dev/search", { q: q2, num: isRefinement ? 50 : 30 }, {
-                    headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
-                    timeout: 12000
-                }).catch(e => ({ data: { organic: [] } }))
-            ]);
+            // 3. Execute with Safety Wrapper (Promise.allSettled for overall route stability)
+            const allBuckets = [...goldBuckets, ...otherBuckets];
+            const searchPromises = allBuckets.map(bucket => 
+                performSafeSerperSearch(internetQuery, bucket, isRefinement ? 50 : 30, isRefinement)
+            );
 
-            const results1 = resp1.data?.organic || [];
-            const results2 = resp2.data?.organic || [];
+            const settleResults = await Promise.allSettled(searchPromises);
+            
+            // 4. Flatten and Deduplicate
+            const allOrganic = settleResults
+                .filter(r => r.status === 'fulfilled')
+                .flatMap(r => r.value);
 
-            // Merge and Deduplicate by Link
-            const merged = [...results1, ...results2];
             const seenLinks = new Set();
-            internetResults = merged.filter(item => {
+            internetResults = allOrganic.filter(item => {
                 const link = item.link || "";
-                if (seenLinks.has(link)) return false;
-                seenLinks.add(link);
-                return true;
+                if (link && !seenLinks.has(link)) {
+                    seenLinks.add(link);
+                    return true;
+                }
+                return false;
             });
 
             console.log(`[Serper.dev] Parallel Sweep: ${internetResults.length} unique results found.`);
+            internetResults.slice(0, 5).forEach(r => console.log(`[Serper RAW] Title: "${r.title}" | Link: ${r.link}`));
         } else {
             // SIMPLE SEARCH: Single broad query
-            console.time(`[Serper] Simple Request: ${internetQuery.slice(0, 30)}...`);
+            const requestId = Math.random().toString(36).slice(-4);
+            const label = `[Serper] Simple Request: ${requestId}`;
+            console.time(label);
             const response = await axios.post("https://google.serper.dev/search", {
                 q: internetQuery,
                 num: isRefinement ? 80 : 60
             }, {
                 headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
-                timeout: 15000
+                timeout: 25000
             });
-            console.timeEnd(`[Serper] Simple Request: ${internetQuery.slice(0, 30)}...`);
+            console.timeEnd(label);
             internetResults = response.data?.organic || [];
             console.log(`[Serper.dev] Simple Mode: ${internetResults.length} results found.`);
+            internetResults.slice(0, 5).forEach(r => console.log(`[Serper RAW] Title: "${r.title}" | Link: ${r.link}`));
         }
 
         const results = internetResults;
+        const processedInternet = [];
 
         results.forEach((item, index) => {
             let provider = "Google";
@@ -303,23 +460,23 @@ export async function performSearch(query, simpleMode = false, identityContext =
             const nameParts = nameLower.split(" ").filter(p => p.length > 1); // "ahmed", "khatri"
             if (nameParts.length === 0) return;
 
-            // 1. Check for PRESENCE of name parts
-            const hasFirstPart = title.includes(nameParts[0]);
-            if (!hasFirstPart) {
-                if (!snippet.includes(nameParts[0])) {
-                    // Refinement Mode Check: If keywords are matched in title/snippet, allow even if name part 1 is missing
-                    const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
-                    const matchesKeyword = keywordsList.some(kw => title.includes(kw) || snippet.includes(kw));
+            // 1. Check for PRESENCE of name parts (Loosened to allow any significant name part)
+            const matchedParts = nameParts.filter(part => title.includes(part) || snippet.includes(part));
+            const hasMinMatch = matchedParts.length >= 1;
 
-                    // Alias Check: For high-confidence knowledge sources (Wikipedia/IMDB), allow alias matching
-                    const isKnowledgeSource = link.includes('wikipedia.org') || link.includes('imdb.com/name') || link.includes('britannica.com');
+            if (!hasMinMatch) {
+                // Refinement Mode Check: If keywords are matched in title/snippet, allow even if name parts are missing
+                const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
+                const matchesKeyword = keywordsList.some(kw => title.includes(kw) || snippet.includes(kw));
 
-                    if ((isRefinement && matchesKeyword) || isKnowledgeSource) {
-                        console.log(`[Discovery] Keeping result despite name mismatch (Keyword/Knowledge): ${title}`);
-                    } else {
-                        console.log(`[Filter] Dropped(Name Mismatch: '${nameParts[0]}'): ${title} `);
-                        return;
-                    }
+                // Alias Check: For high-confidence knowledge sources (Wikipedia/IMDB), allow alias matching
+                const isKnowledgeSource = link.includes('wikipedia.org') || link.includes('imdb.com/name') || link.includes('britannica.com');
+
+                if ((isRefinement && matchesKeyword) || isKnowledgeSource) {
+                    console.log(`[Discovery] Keeping result despite name mismatch (Keyword/Knowledge): ${title}`);
+                } else {
+                    console.log(`[Filter] Dropped(No Name Match): ${title} `);
+                    return;
                 }
             }
 
@@ -335,7 +492,7 @@ export async function performSearch(query, simpleMode = false, identityContext =
                         const lastChar = preceedingText.slice(-1);
 
                         if (!separators.some(sep => sep.trim() === lastChar || preceedingText.endsWith(sep))) {
-                            const allowedPrefixes = ["mr", "mr.", "dr", "dr.", "prof", "user", "member", "student", "about", "images", "photos", "profile", "view", "contact", "biography", "bio", "follow", "visit", "see", "meet", "official", "verified"];
+                            const allowedPrefixes = ["mr", "mr.", "dr", "dr.", "prof", "user", "member", "student", "about", "images", "photos", "profile", "view", "contact", "biography", "bio", "follow", "visit", "see", "meet", "official", "verified", "account", "handle"];
                             const wordsBefore = preceedingText.split(" ");
                             const wordBefore = wordsBefore[wordsBefore.length - 1];
 
@@ -354,14 +511,14 @@ export async function performSearch(query, simpleMode = false, identityContext =
                         const firstChar = followingText.charAt(0);
 
                         if (!separators.some(sep => sep.trim() === firstChar || followingText.startsWith(sep))) {
-                            const allowedSuffixes = ["jr", "sr", "iii", "phd", "md", "profile", "contact", "info", "linkedin", "instagram", "facebook", "twitter", "defined", "wiki", "bio", "net", "org", "com", "official", "page", "account", "handle", "connect", "following", "status", "reels"];
+                            const allowedSuffixes = ["jr", "sr", "iii", "phd", "md", "profile", "contact", "info", "linkedin", "instagram", "facebook", "twitter", "defined", "wiki", "bio", "net", "org", "com", "official", "page", "account", "handle", "connect", "following", "status", "reels", "real", "verified"];
 
                             // Context-Aware Filtering: Allow keywords in the postfix
                             const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
                             const wordsAfter = followingText.split(" ");
                             const wordAfter = wordsAfter[0];
 
-                            if (wordAfter && !allowedSuffixes.includes(wordAfter) && !keywordsList.includes(wordAfter) && !wordAfter.startsWith('@') && isNaN(wordAfter) && wordAfter.length > 1 && provider === "Google") {
+                            if (wordAfter && !allowedSuffixes.includes(wordAfter) && !keywordsList.includes(wordAfter) && !wordAfter.startsWith('@') && !wordAfter.startsWith('(') && isNaN(wordAfter) && wordAfter.length > 1 && provider === "Google") {
                                 console.log(`[Filter] Dropped(Postfix '${wordAfter}'): ${title} `);
                                 return;
                             }
@@ -414,12 +571,12 @@ export async function performSearch(query, simpleMode = false, identityContext =
                 const isKnowledge = knowledgeDomains.some(d => link.includes(d));
 
                 if (isKnowledge) {
-                    internetResults.push({
+                    processedInternet.push({
                         id: `knowledge-${index}`,
                         title: item.title || "Untitled Result",
                         text: item.snippet || "No description available",
                         url: item.link || "",
-                        source: "KnowledgeBase",
+                        source: "Internet", // Explicitly internet
                         provider: provider,
                         type: "KNOWLEDGE",
                         priority: 0, // Top priority
@@ -429,7 +586,7 @@ export async function performSearch(query, simpleMode = false, identityContext =
                 }
             }
 
-            internetResults.push({
+            processedInternet.push({
                 id: `google - ${index} `,
                 title: item.title || "Untitled Result",
                 text: item.snippet || "No description available",
@@ -437,10 +594,12 @@ export async function performSearch(query, simpleMode = false, identityContext =
                 source: "Internet",
                 provider: provider,
                 type: "AUX",
-                priority: 3,
+                priority: provider === "LinkedIn" ? 1 : 3, // Elevate LinkedIn to Primary status
                 images: item.imageUrl ? [item.imageUrl] : []
             });
         });
+        
+        internetResults = processedInternet;
     } catch (err) {
         console.error("Serper.dev search failed:", err.message);
     }
@@ -453,6 +612,10 @@ export async function performSearch(query, simpleMode = false, identityContext =
         if (!internetMap.has(key)) internetMap.set(key, item);
     });
     const dedupedInternetResults = Array.from(internetMap.values());
+
+    if (skipLocal) {
+        return rankResults(dedupedInternetResults, query, identityContext);
+    }
 
     const localMap = new Map();
     [
@@ -518,11 +681,11 @@ router.post("/identify", async (req, res) => {
             ].join(" OR ");
 
             // PIVOT: If keywords or location are provided, we lead with a BROAD search to find the niche profile
-            // otherwise we lead with a social-restricted search.
+            // otherwise we lead with a SOCIAL-RESTRICTED parallel search (via performSearch buckets).
             if (keywords || location) {
                 internetQuery = `"${name}" ${location || ""} ${keywords || ""}`;
             } else {
-                internetQuery = `${name} (${profileSites})`.trim();
+                internetQuery = name; // Let performSearch buckets handle social site restrictions!
             }
         } else {
             internetQuery = `"${name}" OR "${normalizePhoneNumber(name)}"`;
@@ -538,40 +701,71 @@ router.post("/identify", async (req, res) => {
             Promise.resolve().then(() => sqliteSearch(searchQuery)).catch(e => { console.error("[SQLite] err:", e.message); return []; }),
             Document.find({ text: { $regex: searchQuery, $options: "i" } }).limit(10).lean().catch(e => { console.warn("[MongoDB] Identify failed:", e.message); return []; }),
             (async () => {
-                let sRes = await performSearch(internetQuery, true, identityContext, isRefinement).catch(e => []);
+                const searchTaskPromises = [];
 
-                // Broaden search if very few results found for a likely high-profile name
-                if ((!sRes || sRes.length < 5) && inputType === "NAME") {
-                    console.log(`[Identify] Few results (${sRes?.length}). Triggering targeted broad sweep.`);
-                    // Ensure the fallback also uses the keywords/location
-                    const broadQuery = `${name} ${location || ""} ${keywords || ""} profile biography official site`.trim();
-                    const broadRes = await performSearch(broadQuery, true, identityContext, isRefinement).catch(e => []);
-                    sRes = [...(sRes || []), ...(broadRes || [])];
+                // WAVE 1: Standard Internet Discovery (Social Buckets)
+                searchTaskPromises.push(
+                    performSearch(internetQuery, false, identityContext, isRefinement, { skipLocal: true })
+                        .catch(e => { console.error("[Identify] Social Wave fail:", e.message); return []; })
+                );
+
+                // WAVE 2: Wide-Net Discovery (Unrestricted Google Search)
+                // Triggered if keywords/location exist to catch mentions outside social platforms
+                if (keywords || location) {
+                    const wideQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
+                    searchTaskPromises.push(
+                        performSearch(wideQuery, true, identityContext, isRefinement, { skipLocal: true })
+                            .catch(e => { console.error("[Identify] Wide Wave fail:", e.message); return []; })
+                    );
                 }
 
-                // KEYWORD-PRIORITY BUCKET: When keywords are provided (especially in refinement),
-                // run a dedicated search where the keyword leads the query. This ensures
-                // keyword-relevant results are discovered even if name-match filtering
-                // would normally drop them. This is permanent: any future keyword will
-                // automatically get its own discovery bucket.
+                // WAVE 3: Keyword-Priority Discovery
                 if (keywords && inputType === "NAME") {
-                    console.log(`[Identify] Keyword-Priority Bucket: "${keywords}" + "${name}"`);
                     const keywordQuery = `"${keywords}" "${name}"`.trim();
-                    const kwRes = await performSearch(keywordQuery, true, identityContext, true).catch(e => []);
-                    if (kwRes && kwRes.length > 0) {
-                        console.log(`[Identify] Keyword Bucket found ${kwRes.length} additional results.`);
-                        // Merge with URL deduplication
-                        const existingUrls = new Set((sRes || []).map(r => (r.url || "").toLowerCase()));
-                        kwRes.forEach(r => {
-                            if (r.url && !existingUrls.has(r.url.toLowerCase())) {
-                                sRes.push(r);
-                                existingUrls.add(r.url.toLowerCase());
-                            }
-                        });
-                    }
+                    searchTaskPromises.push(
+                        performSearch(keywordQuery, true, identityContext, true, { skipLocal: true })
+                            .catch(e => { console.error("[Identify] Keyword Wave fail:", e.message); return []; })
+                    );
                 }
 
-                return sRes;
+                const searchTaskResults = await Promise.all(searchTaskPromises);
+                
+                // Merge and URL-Deduplicate
+                let sRes = [];
+                const seenUrls = new Set();
+
+                searchTaskResults.forEach(resultSet => {
+                    (resultSet || []).forEach(item => {
+                        const url = (item.url || "").toLowerCase().trim();
+                        if (url && !seenUrls.has(url)) {
+                            seenUrls.add(url);
+                            sRes.push(item);
+                        }
+                    });
+                });
+
+                console.log(`[Identify] Parallel Discovery complete. Total Unique Sources: ${sRes.length}`);
+
+                // Broaden search ONLY if still extremely few results for a name
+                if (sRes.length < 3 && inputType === "NAME") {
+                    console.log(`[Identify] Insufficient results (${sRes.length}). Triggering targeted broad sweep.`);
+                    const broadQuery = `${name} ${location || ""} ${keywords || ""} profile biography official site`.trim();
+                    const broadRes = await performSearch(broadQuery, true, identityContext, isRefinement, { skipLocal: true }).catch(e => []);
+                    (broadRes || []).forEach(item => {
+                        const url = (item.url || "").toLowerCase().trim();
+                        if (url && !seenUrls.has(url)) {
+                            seenUrls.add(url);
+                            sRes.push(item);
+                        }
+                    });
+                }
+
+                return (sRes || []).map(r => ({
+                    ...r,
+                    // Sanitization: Ensure placeholders are NEVER returned from discovery
+                    email: isPlaceholder(r.email) ? null : r.email,
+                    phoneNumbers: (r.phoneNumbers || []).filter(p => !isPlaceholder(p))
+                }));
             })()
         ]);
 
@@ -605,43 +799,44 @@ router.post("/identify", async (req, res) => {
         const localCandidates = [
             ...filteredCSVs.map(r => ({
                 name: r.name,
-                description: r.description || "Identified in CSV Archive",
+                description: r.description?.split(' ').slice(0, 5).join(' ') || "Record found in CSV Archive",
                 location: r.location || "Archives",
                 company: r.company || r.CompanyName || keywords || "",
                 confidence: "Verified",
                 source: "local",
                 url: "",
                 image: r.image,
-                phoneNumbers: r.phoneNumbers,
-                email: r.email,
+                phoneNumbers: (r.phoneNumbers || []).filter(p => !isPlaceholder(p)),
+                email: isPlaceholder(r.email) ? null : r.email,
                 keywordMatched: keywords || ""
             })),
             ...filteredSQLite.map(p => {
                 const parts = (p.text || "").split(" - ");
                 const baseName = p.name || parts[0]?.trim() || "Unknown";
+                const tagline = p.title || p.description || parts.slice(1).join(" - ").trim() || "Identity SQL Record";
                 return {
                     name: baseName,
-                    description: p.title || p.description || parts.slice(1).join(" - ").trim() || "Identity SQL Record",
+                    description: tagline.split(' ').slice(0, 5).join(' '),
                     location: p.location || "Identity SQL",
                     company: p.company || keywords || "",
                     confidence: "Verified",
                     source: "local",
                     url: p.url || "",
                     image: p.image,
-                    phoneNumbers: p.phone ? [p.phone] : [],
-                    email: p.email || "",
+                    phoneNumbers: p.phone && !isPlaceholder(p.phone) ? [p.phone] : [],
+                    email: isPlaceholder(p.email) ? "" : (p.email || ""),
                     keywordMatched: keywords || ""
                 };
             }),
             ...mongoResults.map(d => ({
                 name: (inputType === "PHONE" ? "Potential Lead" : name),
-                description: d.text.substring(0, 150) + "...",
+                description: "Record found in Cluster DB",
                 location: "Cluster DB Archives",
                 company: d.company || keywords || "",
                 confidence: "Verified",
                 source: "local",
                 url: "",
-                email: d.email || "",
+                email: isPlaceholder(d.email) ? null : d.email,
                 metadata: d,
                 keywordMatched: keywords || ""
             }))
@@ -744,27 +939,34 @@ router.post("/identify", async (req, res) => {
                     (existingNormCompany.includes(normCompany) || normCompany.includes(existingNormCompany)) &&
                     (normCompany.length >= 3 || existingNormCompany.length >= 3);
 
-                const candidateEmails = candidate.email ? [candidate.email] : (candidate.emails || []);
-                const candidatePhones = candidate.phoneNumbers || (candidate.phone ? [candidate.phone] : []);
-                const sharedEmail = candidateEmails.some(e => existing.emails.includes(e));
-                const sharedPhone = candidatePhones.some(p => existing.phoneNumbers.includes(p));
+                // --- CONFLICT CHECKS: Professional Domain ---
+                const hasCompanyContradiction = (normCompany && existingNormCompany) && !companyMatch;
+
+                // NEW: Career Stage Merging (Student / Intern / Junior)
+                const roleKeywords = ["student", "intern", "trainee", "junior", "associate", "candidate", "fellow"];
+                const isEarlyCareer = roleKeywords.some(kw => (candidate.description || "").toLowerCase().includes(kw));
+                const existingIsEarlyCareer = roleKeywords.some(kw => (existing.description || "").toLowerCase().includes(kw));
+                
+                const careerStageMatch = (isEarlyCareer || existingIsEarlyCareer) && !hasLocationContradiction;
+
+                const candidateEmails = (candidate.email ? [candidate.email] : (candidate.emails || [])).filter(e => !isPlaceholder(e));
+                const candidatePhones = (candidate.phoneNumbers || (candidate.phone ? [candidate.phone] : [])).filter(p => !isPlaceholder(p));
+                const existingEmails = (existing.emails || []).filter(e => !isPlaceholder(e));
+                const existingPhones = (existing.phoneNumbers || []).filter(p => !isPlaceholder(p));
+
+                const sharedEmail = candidateEmails.some(e => existingEmails.includes(e));
+                const sharedPhone = candidatePhones.some(p => existingPhones.includes(p));
 
                 // --- KNOWLEDGE SOURCE SPECIAL CASE ---
                 const isKnowledgeSource = candidate.type === 'knowledge' || existing.type === 'knowledge' ||
                     (candidate.company || '').toLowerCase() === 'knowledge base' ||
                     (existing.company || '').toLowerCase() === 'knowledge base';
 
-                // --- THE "DIVERSITY" RULE ---
-                // Do NOT merge if they are different people with the same name.
-                // We only merge if:
-                // 1. Explicit overlap exists (Company, Email, or Phone)
-                // 2. OR both are from the same URL (platform profile consolidation)
-                // Knowledge sources (Wikipedia/IMDB) follow the SAME rules as all candidates.
-                // This prevents famous entities from collapsing into a single card.
-
-                const sharedUrl = candidate.url && existing.socials?.some(s => s.url === candidate.url);
-
-                if (sharedUrl || sharedEmail || sharedPhone || companyMatch) {
+                const sharedUrl = candidate.url && (existing.url === candidate.url || existing.socials?.some(s => s.url === candidate.url));
+                const verifiedMatch = sharedUrl || sharedEmail || sharedPhone;
+                const bothLocal = candidate.source === "local" && existing.source === "local";
+                
+                if ((verifiedMatch && !hasCompanyContradiction) || (bothLocal && companyMatch) || (careerStageMatch && companyMatch)) {
                     existingKey = key;
                     break;
                 }
@@ -792,8 +994,8 @@ router.post("/identify", async (req, res) => {
                 }
 
                 // Merge identifiers
-                existing.phoneNumbers = [...new Set([...(existing.phoneNumbers || []), ...(candidate.phoneNumbers || []), ...(candidate.phone ? [candidate.phone] : [])])];
-                existing.emails = [...new Set([...(existing.emails || []), ...(candidate.emails || []), ...(candidate.email ? [candidate.email] : [])])];
+                existing.phoneNumbers = [...new Set([...(existing.phoneNumbers || []), ...(candidate.phoneNumbers || []), ...(candidate.phone ? [candidate.phone] : [])])].filter(p => !isPlaceholder(p));
+                existing.emails = [...new Set([...(existing.emails || []), ...(candidate.emails || []), ...(candidate.email ? [candidate.email] : [])])].filter(e => !isPlaceholder(e));
 
                 // Aggregate socials/URLs correctly
                 if (!existing.socials) existing.socials = [];
@@ -996,31 +1198,48 @@ router.post("/deep", async (req, res) => {
             }).lean();
             const csvMatch = [...(await searchCSVs(name, "NAME")), ...(await searchCSVs(fuzzyName, "NAME"))];
 
-            // Deduplicate local results by text
+            // Deduplicate local results by text and add source labels
             const uniqueLocal = new Map();
-            [...sqliteMatch, ...mongoMatch, ...csvMatch].forEach(r => {
+            sqliteMatch.forEach(p => {
+                const txt = (p.text || p.description || "").toLowerCase().trim();
+                if (!uniqueLocal.has(txt)) {
+                    uniqueLocal.set(txt, {
+                        text: p.text || p.description || p.name,
+                        source: "SQLite source",
+                        priority: 1
+                    });
+                }
+                if (p.phone) localPhones.add(normalizePhoneNumber(p.phone));
+                if (p.email) localEmails.add(p.email.toLowerCase().trim());
+            });
+
+            mongoMatch.forEach(r => {
                 const txt = (r.text || r.description || "").toLowerCase().trim();
                 if (!uniqueLocal.has(txt)) {
                     uniqueLocal.set(txt, {
                         text: r.text || r.description || r.name,
-                        source: r.source || (r.text ? "MongoDB" : "Local"),
+                        source: "MongoDB source",
                         priority: 1
                     });
                 }
+                if (r.email) localEmails.add(r.email.toLowerCase().trim());
             });
 
-            localResults.push(...uniqueLocal.values());
-
-            // Extract phones/emails
             csvMatch.forEach(r => {
+                const txt = (r.text || r.description || "").toLowerCase().trim();
+                if (!uniqueLocal.has(txt)) {
+                    uniqueLocal.set(txt, {
+                        text: r.text || r.description || r.name,
+                        source: "CSV source",
+                        priority: 1
+                    });
+                }
                 if (r.phoneNumbers) r.phoneNumbers.forEach(p => localPhones.add(p));
                 if (r.email) localEmails.add(r.email.toLowerCase().trim());
                 if (r.emails) r.emails.forEach(e => localEmails.add(e.toLowerCase().trim()));
             });
-            sqliteMatch.forEach(p => {
-                if (p.phone) localPhones.add(normalizePhoneNumber(p.phone));
-                if (p.email) localEmails.add(p.email.toLowerCase().trim());
-            });
+
+            localResults.push(...uniqueLocal.values());
         } catch (e) {
             console.warn("Local search failed during deep dive:", e);
         }
@@ -1081,7 +1300,7 @@ router.post("/deep", async (req, res) => {
         let targetDomain = null;
         if (keyword && keyword.includes('.') && !keyword.includes(' ')) targetDomain = keyword;
 
-        const [
+        let [
             socialStrict,
             socialBroad,
             contextBroad,
@@ -1109,18 +1328,18 @@ router.post("/deep", async (req, res) => {
         console.log(`[Deep Search] Generated ${tier1Dorks.length} Tier 1 dork queries`);
 
 
-
-
-        // Process External Documents
-        const externalDocuments = (docResults || []).map(doc => ({
-            title: doc.title || "Untitled Document",
-            snippet: doc.snippet || doc.text || "No description available",
-            url: doc.url || doc.link,
-            platform: doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' :
-                (doc.url?.toLowerCase().includes('.doc') ? 'DOCX' :
-                    (doc.url?.toLowerCase().includes('.ppt') ? 'PPT' : 'Document')),
-            timestamp: new Date().toISOString()
-        }));
+        // Process External Documents with strict validation
+        const externalDocuments = (docResults || [])
+            .filter(doc => validateEvidence(doc, name, { location: cleanLocation, keywords: keyword, profession: cleanProfession }))
+            .map(doc => ({
+                title: doc.title || "Untitled Document",
+                snippet: doc.snippet || doc.text || "No description available",
+                url: doc.url || doc.link,
+                platform: doc.url?.toLowerCase().endsWith('.pdf') ? 'PDF' :
+                    (doc.url?.toLowerCase().includes('.doc') ? 'DOCX' :
+                        (doc.url?.toLowerCase().includes('.ppt') ? 'PPT' : 'Document')),
+                timestamp: new Date().toISOString()
+            }));
 
         // Merge and deduplicate results, favoring strict matches
         const socialResults = [...socialStrict];
@@ -1332,6 +1551,34 @@ router.post("/deep", async (req, res) => {
             socialProfiles = socialProfiles.map(p => ({ ...p, aiUnverified: true }));
         } else {
             socialProfiles = refinedProfiles;
+            // SECOND PASS ENRICHMENT: Attempt again with corporate context only if needed
+            const hasVerifiedEmail = enrichmentResult?.emails?.some(e => e.includes('@') && !e.includes('example.com'));
+            const hasMultiplePhones = enrichmentResult?.phones?.length > 1;
+
+            if (!hasVerifiedEmail && !hasMultiplePhones && socialProfiles.length > 0) {
+                console.log(`[Deep Search] Early enrichment insufficient. Starting second pass with social anchoring...`);
+                // CONSOLDIDATION: Use the broad enrichContact which now returns objects
+                const secondPass = await enrichContact(name, null, targetDomain, socialProfiles);
+                if (secondPass) {
+                    console.log(`[Deep Search] Second pass success: Found ${secondPass.emails?.length || 0} emails and ${secondPass.phones?.length || 0} phones.`);
+                    enrichmentResult = secondPass;
+                }
+            } else {
+                console.log(`[Deep Search] Smart Skip: Sufficient intelligence gathered in first pass.`);
+            }
+
+            // Wikipedia Image Integration
+            if (wikiResult && wikiResult.imageUrl) {
+                finalImageResults.unshift({
+                    id: `wiki-image-0`,
+                    title: `${name} (Wikipedia)`,
+                    imageUrl: wikiResult.imageUrl,
+                    thumbnailUrl: wikiResult.imageUrl,
+                    sourceUrl: wikiResult.url,
+                    source: 'Wikipedia',
+                    confidence: 95
+                });
+            }
         }
 
         console.log(`[Deep Search] AI Refinement complete. Final profiles: ${socialProfiles.length}`);
@@ -1395,8 +1642,20 @@ router.post("/deep", async (req, res) => {
                 name,
                 location: location || person.location,
                 description: finalDescription,
-                emails: [...new Set([...(person.emails || []), ...(enrichmentResult?.email ? [enrichmentResult.email] : []), ...Array.from(localEmails), ...Array.from(webEmails)])],
-                phoneNumbers: [...new Set([...(person.phoneNumbers || []), ...Array.from(localPhones), ...Array.from(webPhones)])],
+                emails: [...new Set([
+                    ...(person.emails || []), 
+                    ...(enrichmentResult?.emails || []), 
+                    ...(enrichmentResult?.email ? [enrichmentResult.email] : []),
+                    ...Array.from(localEmails), 
+                    ...Array.from(webEmails)
+                ])].filter(e => !isPlaceholder(e)),
+                phoneNumbers: [...new Set([
+                    ...(person.phoneNumbers || []), 
+                    ...(enrichmentResult?.phones || []), 
+                    ...(enrichmentResult?.phone ? [enrichmentResult.phone] : []),
+                    ...Array.from(localPhones), 
+                    ...Array.from(webPhones)
+                ])].filter(p => !isPlaceholder(p)),
                 enrichmentRecord: enrichmentResult
             },
             socials: socialProfiles,
@@ -1419,10 +1678,9 @@ router.post("/verify", async (req, res) => {
     try {
         console.log(`[Deep Search] Starting Layer 2 (Heavy) for: ${name}`);
 
-        // 1. EXTRACTION: Get contact signals for targeted Instagram probing
-        const signals = extractContactInfo(allSearchItems || []);
-        const enrichedEmails = (signals.emails || []).filter(e => typeof e === 'string' && e.includes('@'));
-        const enrichedPhones = (signals.phones || []).filter(p => typeof p === 'string' && p.length >= 7 && !p.includes('.'));
+        // 2. ENRICHMENT: Skipped in Layer 2 (Now consolidated in Layer 1 for reliability)
+        const enrichedEmails = person.emails || [];
+        const enrichedPhones = person.phoneNumbers || [];
 
         // 2. PROBE: Perform targeted Instagram discovery for the SELECTED candidate
         let discoveredInstagram = null;

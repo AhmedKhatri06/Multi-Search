@@ -143,11 +143,11 @@ export const generateDocumentDorks = (params) => {
     const context = `${keywords || ''} ${location || ''}`.trim();
 
     return [
-        `"${cleanName}" filetype:pdf (resume OR cv OR bio OR profiling)`,
-        `"${cleanName}" ${context} filetype:pdf`,
-        `site:linkedin.com/in/ "${cleanName}" filetype:pdf`,
-        `"${cleanName}" filetype:docx OR filetype:doc`,
-        `"${cleanName}" ${context} filetype:ppt OR filetype:pptx`
+        `"${cleanName}" filetype:pdf (resume OR cv OR bio OR profiling OR report)`,
+        `"${cleanName}" ${context} filetype:pdf OR filetype:csv`,
+        `site:linkedin.com/in/ "${cleanName}" filetype:pdf OR filetype:csv`,
+        `"${cleanName}" filetype:docx OR filetype:doc OR filetype:xlsx OR filetype:xls`,
+        `"${cleanName}" ${context} filetype:ppt OR filetype:pptx OR filetype:csv`
     ];
 };
 

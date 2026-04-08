@@ -9,6 +9,20 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000';
 
 
 
+
+// Helper: Identify synthetic/placeholder data patterns that should NEVER be used for merging or displayed as 'Verified'
+const isPlaceholder = (value) => {
+    if (!value) return true;
+    const v = value.toLowerCase().trim();
+    return v.includes('noemail.com') || 
+           v.includes('example.com') || 
+           v.includes('test.com') ||
+           v.startsWith('+00') || 
+           v === 'not found' || 
+           v === 'unknown' ||
+           v === '****@****';
+};
+
 const getPlatformEmoji = (platform) => {
     if (!platform) return '🔗';
     const p = platform.toLowerCase();
@@ -37,11 +51,11 @@ const getPlatformEmoji = (platform) => {
 
 const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, personaName }) => {
     const loadingMessages = [
-        "Initializing intelligence scan",
-        "Querying distributed data nodes",
-        "Analyzing digital footprint",
-        "Cross-referencing identity signals",
-        "Compiling final intel report"
+        "Initializing scan",
+        "Searching records",
+        "Analyzing signals",
+        "Extracting deep intelligence",
+        "Generating report"
     ];
 
     const clampedProgress = Math.min(Math.floor(progress), 100);
@@ -78,7 +92,6 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
 
                 {/* Target Identity */}
                 <div className="pill-identity-block">
-                    <span className="pill-intel-label">INTEL CORE ACTIVE</span>
                     <h2 className="pill-target-name">{personaName || query}</h2>
                 </div>
 
@@ -258,14 +271,14 @@ const MultiSearchPage = () => {
     };
 
     const maskPhone = (phone) => {
-        if (!phone) return "";
+        if (!phone || isPlaceholder(phone)) return "";
         const clean = phone.replace(/\D/g, "");
         if (clean.length <= 4) return "****";
         return `+${clean.slice(0, 2)} ******${clean.slice(-4)}`;
     };
 
     const maskEmail = (email) => {
-        if (!email) return "";
+        if (!email || isPlaceholder(email)) return "";
         const [user, domain] = email.split("@");
         if (!domain) return "****@****";
         return user.slice(0, 2) + "******@" + domain;
@@ -406,14 +419,16 @@ const MultiSearchPage = () => {
                 if (itemSource === groupSource && groupName === name) return true;
 
                 // 2. Cross-source matching via identifiers (Stronger Anchor)
-                const itemPhones = item.phoneNumbers || (item.phone ? [item.phone] : []);
-                const groupPhones = group.phoneNumbers || [];
-                const itemEmails = item.email ? [item.email.toLowerCase()] : (item.emails || []);
-                const groupEmails = group.emails || [];
+                const itemPhones = (item.phoneNumbers || (item.phone ? [item.phone] : [])).filter(p => !isPlaceholder(p));
+                const groupPhones = (group.phoneNumbers || []).filter(p => !isPlaceholder(p));
+                const itemEmails = (item.email ? [item.email.toLowerCase()] : (item.emails || [])).filter(e => !isPlaceholder(e));
+                const groupEmails = (group.emails || []).filter(e => !isPlaceholder(e));
 
-                if (itemPhones.some(p => groupPhones.includes(p))) return true;
-                if (itemEmails.some(e => groupEmails.includes(e.toLowerCase()))) return true;
+                if (itemPhones.length > 0 && itemPhones.some(p => groupPhones.includes(p))) return true;
+                if (itemEmails.length > 0 && itemEmails.some(e => groupEmails.includes(e.toLowerCase()))) return true;
 
+                // 3. SELECTION DIVERSITY: If they don't share high-entropy identifiers (like a real email) 
+                // and they come from different sources (Internet vs Local), do NOT merge them based on name alone.
                 return false;
             });
 
@@ -516,12 +531,17 @@ const MultiSearchPage = () => {
         }
 
         // id: 12 - Sync global query so progress bar shows the LATEST name/number
-        setQuery(finalSearchName);
+        // F-003: Format display name as "Name keyword" if keyword exists
+        const displayName = precisionData?.keyword 
+            ? `${finalSearchName} ${precisionData.keyword}` 
+            : finalSearchName;
+            
+        setQuery(displayName);
         const finalQuery = finalSearchName;
 
         const VITE_API_URL = API_URL || "http://localhost:5000";
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s fail-safe
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s fail-safe
 
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/identify`, {
@@ -559,15 +579,31 @@ const MultiSearchPage = () => {
                 setLoadProgress(50); // Jump to 50% when candidates are found
                 setStage(STAGES.SELECTING);
             } else {
-                console.log("[Search] No candidates found. Triggering Precision Search.");
-                setStage(STAGES.ENTRY);
-                setShowFeedbackForm(true);
+                if (isRefinement) {
+                    console.log("[Search] Refined search returned no results. Ending flow.");
+                    alert("Even with specialized attributes, no matching identity could be verified across current internet and local sources. Please try different keywords or a broader location.");
+                    
+                    // B-004: Reset query to the original base name to prevent keyword pollution
+                    if (precisionData?.name) {
+                        setQuery(precisionData.name);
+                    }
+                    
+                    setLoadProgress(0);
+                    // FIXED: Stay in SELECTING stage so the user can see the 'Person Not Found' option
+                    // instead of being forced back to the home page (which creates the loop).
+                    setStage(STAGES.SELECTING);
+                    setCandidates([]); // Ensure it shows the "No Potential Matches" view
+                } else {
+                    console.log("[Search] No candidates found. Triggering Precision Search.");
+                    setStage(STAGES.ENTRY);
+                    setShowFeedbackForm(true);
+                }
             }
         } catch (err) {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError') {
-                console.error("Identification timed out after 45s");
-                alert("The search is taking longer than expected. Please try again with more specific keywords.");
+                console.error("Identification timed out after 60s");
+                alert("The initial identification is taking longer than expected. Please try again with more specific keywords.");
             } else {
                 console.error("Identification failed:", err);
                 alert("Search service is currently unreachable. If you are using the deployed version, please ensure the backend is active and the API URL is configured correctly.");
@@ -582,15 +618,19 @@ const MultiSearchPage = () => {
         setLoadProgress(60); // Start deep search at 60%
         setData(prev => ({ ...prev, personaName: candidate.name })); // Ensure name shows in loader
         const VITE_API_URL = API_URL || "http://localhost:5000";
+        
+        // SYNC: Create a new controller and tie it to the ref for cancellation support
+        if (abortControllerRef.current) abortControllerRef.current.abort();
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 45000); // 45s fail-safe
+        abortControllerRef.current = controller;
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s fail-safe for deep OSINT
 
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/deep`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ person: candidate }),
-                signal: abortControllerRef.current?.signal
+                signal: abortControllerRef.current.signal
             });
             clearTimeout(timeoutId);
 
@@ -635,6 +675,7 @@ const MultiSearchPage = () => {
                             ...prev.person,
                             aiSummary: verifyData.aiSummary, // Update with high-quality AI summary
                             primaryImage: verifyData.primaryImage || prev.person.primaryImage
+                            // Note: Contact info (emails/phones) is now consolidated in /deep (Layer 1)
                         }
                     }));
                 }
@@ -649,8 +690,8 @@ const MultiSearchPage = () => {
         } catch (err) {
             clearTimeout(timeoutId);
             if (err.name === 'AbortError') {
-                console.error("Deep search timed out after 45s");
-                alert("Deep intelligence gathering is taking too long. Please try again later.");
+                console.error("Deep search timed out after 90s");
+                alert("Deep intelligence gathering is taking longer than expected (90s). Please try again or refine your search.");
             } else {
                 console.error("Deep Search failed:", err);
                 alert("Failed to retrieve deep search details. Please check your connection.");

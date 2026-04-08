@@ -24,9 +24,13 @@ export async function searchWithDorks(dorks, numPerQuery = 10) {
 
     const promises = dorks.map(async (dork, index) => {
         try {
-            console.log(`  [Dork ${index + 1}] ${dork.slice(0, 80)}...`);
+            // TIGHTENING: Serper has a character limit for queries (usually 256-512)
+            // We cap at 256 to be safe and avoid 400 Bad Request
+            const safeDork = dork.length > 256 ? dork.substring(0, 256).trim() : dork;
+            
+            console.log(`  [Dork ${index + 1}] ${safeDork.slice(0, 80)}...`);
             const response = await axios.post('https://google.serper.dev/search', {
-                q: dork,
+                q: safeDork,
                 num: numPerQuery
             }, {
                 headers: {
@@ -134,12 +138,12 @@ export function calculateImageScore(item, targetName = "", contextKeywords = [])
         // Standard name scoring
         if (matches === nameParts.length && nameParts.length > 0) {
             score += 60; // Perfect name match
-        } else if (matches >= 2) {
-            score += 40; // High confidence
-        } else if (matches === 1) {
-            score += 20; // Some evidence
+        } else if (matches >= 1) {
+            // Adaptive name match (e.g. "Atharva" for "Atharva Auti")
+            // Instead of -40 for partial, we give 20-30 and let context decide
+            score += 25; 
         } else {
-            score -= 40;
+            score -= 50; // Total mismatch
         }
 
         // Contextual Fallback: If at least ONE name part matches AND context is strong, boost it

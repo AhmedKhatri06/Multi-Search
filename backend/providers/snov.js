@@ -4,8 +4,8 @@ import axios from 'axios';
  * Snov.io Provider Adapter
  */
 export async function enrichWithSnov(name, domain) {
-    const userId = process.env.SNOV_USER_ID;
-    const apiKey = process.env.SNOV_API_KEY;
+    const userId = process.env.SNOV_USER_ID || process.env.SNOV_CLIENT_ID;
+    const apiKey = process.env.SNOV_API_KEY || process.env.SNOV_CLIENT_SECRET;
     if (!userId || !apiKey) return null;
 
     try {

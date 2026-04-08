@@ -1,7 +1,9 @@
 // Social Media Discovery Service
 const platformPriority = {
-    'linkedin': 1,
-    'github': 2,
+    'wikipedia': 0, // Knowledge sources always win
+    'linkedin': 1,  // PRIMARY IDENTITY SOURCE (Elevated from 2 to 1)
+    'imdb': 2,
+    'github': 3,
     'twitter': 3,
     'x': 3,
     'instagram': 4,
@@ -18,7 +20,8 @@ const platformPriority = {
     'behance': 15,
     'dribbble': 16,
     'linktree': 17,
-    'aboutme': 18
+    'aboutme': 18,
+    'bumble': 19
 };
 
 const profilePatterns = {
@@ -41,7 +44,8 @@ const profilePatterns = {
     behance: /^https?:\/\/(www\.)?behance\.net\/[a-zA-Z0-9._-]+\/?$/,
     dribbble: /^https?:\/\/(www\.)?dribbble\.com\/[a-zA-Z0-9._-]+\/?$/,
     linktree: /^https?:\/\/(www\.)?linktr\.ee\/[a-zA-Z0-9._-]+\/?$/,
-    aboutme: /^https?:\/\/(www\.)?about\.me\/[a-zA-Z0-9._-]+\/?$/
+    aboutme: /^https?:\/\/(www\.)?about\.me\/[a-zA-Z0-9._-]+\/?$/,
+    bumble: /^https?:\/\/(www\.)?bumble\.com\/[a-zA-Z0-9._-]+\/?$/
 };
 
 const disqualifyingPatterns = [
@@ -101,23 +105,45 @@ function calculateIdentityScore(result, personName, options = {}) {
         score += 40;
     }
 
-    // 1. Adaptive Name Matching (0-40 points)
-    // ENHANCED: Check title, URL, AND snippet/bio for name parts
+    // 1. Adaptive Name Match Scoring (0-40 points)
     const nameParts = personName.toLowerCase().split(/\s+/).filter(p => p.length > 2);
     if (nameParts.length < 1) return 0;
 
+    const firstName = nameParts[0];
+    const surname = nameParts.length > 1 ? nameParts[nameParts.length - 1] : null;
+
+    let firstNameMatched = title.includes(firstName) || link.includes(firstName);
+    let surnameMatched = surname ? (title.includes(surname) || link.includes(surname)) : true;
+
+    // CRITICAL: Full-text scan if simple header check fails
+    if (!firstNameMatched || !surnameMatched) {
+        if (!firstNameMatched && combinedText.includes(firstName)) firstNameMatched = true;
+        if (!surnameMatched && surname && combinedText.includes(surname)) surnameMatched = true;
+    }
+
+    // SURNAME ENFORCEMENT: If they have a surname, it MUST match for common sources.
+    if (surname && !surnameMatched && !knownHandle) {
+        console.log(`    [Identity Reject] Surname mismatch for ${platform}: ${link}`);
+        return 0; 
+    }
+
+    // WIKIPEDIA ANCHORING: Strict Title/URL requirement for Wikipedia to avoid collision (e.g. Desai vs Doshi)
+    if (platform === 'wikipedia' && surname) {
+        const titleAnchor = title.includes(surname);
+        const urlAnchor = link.includes(surname);
+        if (!titleAnchor && !urlAnchor && !knownHandle) {
+            console.log(`    [Identity Reject] Wikipedia Anchor failure (Surname not in Title/URL): ${link}`);
+            return 0;
+        }
+    }
+
     let nameMatches = 0;
     nameParts.forEach(part => {
-        if (title.includes(part) || link.includes(part) || cleanedSnippet.includes(part)) nameMatches++;
+        if (combinedText.includes(part) || link.includes(part)) nameMatches++;
     });
 
-    // RELAXED REJECTION LOGIC:
-    // All platforms now require at least 1 name part match.
-    // Previously LinkedIn required 2 parts, which filtered out valid profiles with
-    // combined usernames like "mihirdoshi2" where only one name part appears in the URL.
-    if (nameMatches < 1 && !knownHandle) return 0;
-
-    score += (nameMatches / nameParts.length) * 40;
+    const nameMatchRatio = nameMatches / nameParts.length;
+    score += nameMatchRatio * 40;
 
     // 2. Company/Identity Core Match (0-50 points)
     let hasKeywordMatch = false;
@@ -173,6 +199,11 @@ function calculateIdentityScore(result, personName, options = {}) {
         score -= 60;
     }
 
+    // 7. PRIMARY SOURCE BOOST (LinkedIn Precision)
+    if (platform === 'linkedin') {
+        score += 10; // Explicit boost for professional verification source
+    }
+
     return Math.max(0, Math.round(score));
 }
 
@@ -222,6 +253,9 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
         else if (link.includes('dribbble.com')) platform = 'dribbble';
         else if (link.includes('linktr.ee')) platform = 'linktree';
         else if (link.includes('about.me')) platform = 'aboutme';
+        else if (link.includes('wikipedia.org')) platform = 'wikipedia';
+        else if (link.includes('imdb.com/name/')) platform = 'imdb';
+        else if (link.includes('bumble.com')) platform = 'bumble';
 
         if (!platform) return;
 
@@ -300,10 +334,10 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
 }
 
 export const supportedPlatformDomains = [
-    'linkedin.com/in/', 'github.com', 'twitter.com', 'x.com', 'instagram.com',
+    'linkedin.com/in/', 'en.wikipedia.org', 'imdb.com/name/', 'github.com', 'twitter.com', 'x.com', 'instagram.com',
     'facebook.com', 't.me/', 'tiktok.com', 'pinterest.com', 'youtube.com',
     'snapchat.com', 'reddit.com', 'crunchbase.com/person/', 'medium.com',
-    'stackoverflow.com/users/', 'behance.net', 'dribbble.com', 'linktr.ee', 'about.me'
+    'stackoverflow.com/users/', 'behance.net', 'dribbble.com', 'linktr.ee', 'about.me', 'bumble.com'
 ];
 
 export { calculateIdentityScore };
