@@ -144,15 +144,56 @@ const MultiSearchPage = () => {
     };
 
     const COUNTRIES = [
-        { code: 'AF', name: 'Afghanistan', flag: '🇦🇫', prefix: '+93' },
-        { code: 'AL', name: 'Albania', flag: '🇦🇱', prefix: '+355' },
-        { code: 'DZ', name: 'Algeria', flag: '🇩🇿', prefix: '+213' },
-        { code: 'AS', name: 'American Samoa', flag: '🇦🇸', prefix: '+1' },
-        { code: 'AD', name: 'Andorra', flag: '🇦🇩', prefix: '+376' },
-        { code: 'AO', name: 'Angola', flag: '🇦🇴', prefix: '+244' },
-        { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', prefix: '+44' },
         { code: 'US', name: 'United States', flag: '🇺🇸', prefix: '+1' },
+        { code: 'GB', name: 'United Kingdom', flag: '🇬🇧', prefix: '+44' },
         { code: 'IN', name: 'India', flag: '🇮🇳', prefix: '+91' },
+        { code: 'CA', name: 'Canada', flag: '🇨🇦', prefix: '+1' },
+        { code: 'AU', name: 'Australia', flag: '🇦🇺', prefix: '+61' },
+        { code: 'DE', name: 'Germany', flag: '🇩🇪', prefix: '+49' },
+        { code: 'FR', name: 'France', flag: '🇫🇷', prefix: '+33' },
+        { code: 'IT', name: 'Italy', flag: '🇮🇹', prefix: '+39' },
+        { code: 'ES', name: 'Spain', flag: '🇪🇸', prefix: '+34' },
+        { code: 'BR', name: 'Brazil', flag: '🇧🇷', prefix: '+55' },
+        { code: 'MX', name: 'Mexico', flag: '🇲🇽', prefix: '+52' },
+        { code: 'CN', name: 'China', flag: '🇨🇳', prefix: '+86' },
+        { code: 'JP', name: 'Japan', flag: '🇯🇵', prefix: '+81' },
+        { code: 'KR', name: 'South Korea', flag: '🇰🇷', prefix: '+82' },
+        { code: 'RU', name: 'Russia', flag: '🇷🇺', prefix: '+7' },
+        { code: 'ZA', name: 'South Africa', flag: '🇿🇦', prefix: '+27' },
+        { code: 'NG', name: 'Nigeria', flag: '🇳🇬', prefix: '+234' },
+        { code: 'EG', name: 'Egypt', flag: '🇪🇬', prefix: '+20' },
+        { code: 'SA', name: 'Saudi Arabia', flag: '🇸🇦', prefix: '+966' },
+        { code: 'AE', name: 'UAE', flag: '🇦🇪', prefix: '+971' },
+        { code: 'SG', name: 'Singapore', flag: '🇸🇬', prefix: '+65' },
+        { code: 'MY', name: 'Malaysia', flag: '🇲🇾', prefix: '+60' },
+        { code: 'ID', name: 'Indonesia', flag: '🇮🇩', prefix: '+62' },
+        { code: 'TH', name: 'Thailand', flag: '🇹🇭', prefix: '+66' },
+        { code: 'VN', name: 'Vietnam', flag: '🇻🇳', prefix: '+84' },
+        { code: 'PH', name: 'Philippines', flag: '🇵🇭', prefix: '+63' },
+        { code: 'PK', name: 'Pakistan', flag: '🇵🇰', prefix: '+92' },
+        { code: 'BD', name: 'Bangladesh', flag: '🇧🇩', prefix: '+880' },
+        { code: 'TR', name: 'Turkey', flag: '🇹🇷', prefix: '+90' },
+        { code: 'NL', name: 'Netherlands', flag: '🇳🇱', prefix: '+31' },
+        { code: 'BE', name: 'Belgium', flag: '🇧🇪', prefix: '+32' },
+        { code: 'CH', name: 'Switzerland', flag: '🇨🇭', prefix: '+41' },
+        { code: 'AT', name: 'Austria', flag: '🇦🇹', prefix: '+43' },
+        { code: 'SE', name: 'Sweden', flag: '🇸🇪', prefix: '+46' },
+        { code: 'NO', name: 'Norway', flag: '🇳🇴', prefix: '+47' },
+        { code: 'DK', name: 'Denmark', flag: '🇩🇰', prefix: '+45' },
+        { code: 'FI', name: 'Finland', flag: '🇫🇮', prefix: '+358' },
+        { code: 'IE', name: 'Ireland', flag: '🇮🇪', prefix: '+353' },
+        { code: 'NZ', name: 'New Zealand', flag: '🇳🇿', prefix: '+64' },
+        { code: 'AR', name: 'Argentina', flag: '🇦🇷', prefix: '+54' },
+        { code: 'CL', name: 'Chile', flag: '🇨🇱', prefix: '+56' },
+        { code: 'CO', name: 'Colombia', flag: '🇨🇴', prefix: '+57' },
+        { code: 'PE', name: 'Peru', flag: '🇵🇪', prefix: '+51' },
+        { code: 'PT', name: 'Portugal', flag: '🇵🇹', prefix: '+351' },
+        { code: 'GR', name: 'Greece', flag: '🇬🇷', prefix: '+30' },
+        { code: 'PL', name: 'Poland', flag: '🇵🇱', prefix: '+48' },
+        { code: 'RO', name: 'Romania', flag: '🇷🇴', prefix: '+40' },
+        { code: 'HU', name: 'Hungary', flag: '🇭🇺', prefix: '+36' },
+        { code: 'CZ', name: 'Czech Republic', flag: '🇨🇿', prefix: '+420' },
+        { code: 'UA', name: 'Ukraine', flag: '🇺🇦', prefix: '+380' }
     ].sort((a, b) => b.prefix.length - a.prefix.length); // Match longest prefix first
 
     const [stage, setStage] = useState(() => localStorage.getItem("lookup-stage") || STAGES.ENTRY);
@@ -184,39 +225,24 @@ const MultiSearchPage = () => {
         return () => document.removeEventListener("mousedown", handleClickOutside);
     }, []);
 
+    const [manualCountry, setManualCountry] = useState(false);
+
     // Auto-Country Detection & Auto-Switch to Phone Mode
     useEffect(() => {
-        // If user is typing a query that looks like a phone number, optionally auto-switch modes or detect country
-        const cleanQuery = query.replace(/\D/g, "");
+        if (manualCountry) return; // Stop auto-detect if user manually selected
 
-        if (searchMode === SEARCH_MODES.PHONE) {
-            if (query.startsWith('+')) {
-                const matched = COUNTRIES.find(c => query.startsWith(c.prefix));
-                if (matched && matched.code !== selectedCountry.code) {
-                    setSelectedCountry(matched);
-                }
-            } else if (cleanQuery.length >= 10) {
-                // If no plus, try to guess based on length and starting digit
-                if (cleanQuery.length === 10) {
-                    const firstDigit = cleanQuery.charAt(0);
-                    // Indian numbers typically start with 6, 7, 8, 9
-                    if (['6', '7', '8', '9'].includes(firstDigit)) {
-                        const india = COUNTRIES.find(c => c.code === 'IN');
-                        if (india && selectedCountry.code !== 'IN') setSelectedCountry(india);
-                    } else {
-                        // Otherwise default guess to US for 10 digit
-                        const us = COUNTRIES.find(c => c.code === 'US');
-                        if (us && selectedCountry.code !== 'US') setSelectedCountry(us);
-                    }
-                }
-            }
-        } else if (searchMode === SEARCH_MODES.GENERAL) {
+        if (searchMode === SEARCH_MODES.GENERAL) {
             // Auto switch to phone mode if they type a plus followed by numbers
-            if (query.startsWith('+') && query.length > 1 && /^\+\d+$/.test(query.replace(/\s/g, ''))) {
+            if (query.startsWith('+') && query.length > 2 && /^\+\d+/.test(query.replace(/\s/g, ''))) {
                 setSearchMode(SEARCH_MODES.PHONE);
+                
+                // Try to detect country
+                const matched = COUNTRIES.find(c => query.startsWith(c.prefix));
+                if (matched) setSelectedCountry(matched);
             }
         }
-    }, [query, searchMode, COUNTRIES, selectedCountry]);
+    }, [query, searchMode, COUNTRIES, manualCountry]);
+
 
     // Stage 6: Preview Modal
     const [previewUrl, setPreviewUrl] = useState(null);
@@ -955,7 +981,11 @@ const MultiSearchPage = () => {
                                             {showCountryDropdown && (
                                                 <div className="country-dropdown-v2">
                                                     {COUNTRIES.map((c) => (
-                                                        <div key={c.code} className="country-option-v2" onClick={() => { setSelectedCountry(c); setShowCountryDropdown(false); }}>
+                                                        <div key={c.code} className="country-option-v2" onClick={() => { 
+                                                            setSelectedCountry(c); 
+                                                            setShowCountryDropdown(false); 
+                                                            setManualCountry(true);
+                                                        }}>
                                                             <span className="option-flag">{c.flag}</span>
                                                             <span className="option-name">{c.name}</span>
                                                             <span className="option-prefix">{c.prefix}</span>
@@ -975,6 +1005,7 @@ const MultiSearchPage = () => {
                                     pattern={searchMode === SEARCH_MODES.PHONE ? "[0-9]*" : undefined}
                                     placeholder={searchMode === SEARCH_MODES.PHONE ? "Enter mobile number..." : "Enter name, email, or digital identity..."}
                                     value={query}
+                                    maxLength={30}
                                     onChange={(e) => {
                                         if (searchMode === SEARCH_MODES.PHONE) {
                                             setQuery(e.target.value.replace(/\D/g, ''));
@@ -1470,6 +1501,7 @@ const MultiSearchPage = () => {
                                         onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
                                         autoFocus
                                         required
+                                        maxLength={30}
                                     />
                                 </div>
                                 <div className="form-group">
@@ -1482,19 +1514,7 @@ const MultiSearchPage = () => {
                                         placeholder="e.g. Student at MIT"
                                     />
                                 </div>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NUMBER (LOCAL ONLY)</label>
-                                    <input
-                                        className="hero-search-input"
-                                        type="tel"
-                                        inputMode="numeric"
-                                        pattern="[0-9]*"
-                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
-                                        value={feedbackData.number}
-                                        onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value.replace(/\D/g, '') })}
-                                        placeholder="e.g. 91xxxxxxxxxx"
-                                    />
-                                </div>
+
                             </div>
                         </div>
 

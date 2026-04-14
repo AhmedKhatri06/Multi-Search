@@ -36,6 +36,7 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       IDENTITY CONSOLIDATION (SELECTIVE):
       - ONLY combine results into ONE candidate if they refer to the EXACT SAME individual.
       - **DOMAIN COLLISION (CRITICAL)**: If you find two people with the same name but DIFFERENT companies, professional roles, or industries (e.g. 'Software Engineer at Google' vs 'Director at a Hospital'), you MUST return them as separate objects.
+      - **CONTEXTUAL LENIENCE**: If the user provides a specific keyword (like a startup name) but the search snippets are brief and only mention the person's name and general role (e.g., 'Founder', 'Engineer'), you SHOULD still include them if the name is an exact match and the general field aligns.
       - **DO NOT** combine their descriptions into one string with a separator like '|' or '/'. This is a failure of disambiguation.
       - Rule of Thumb: If you aren't 95% sure they are the same person (e.g., matching LinkedIn and matching personal site context), list them as DISTINCT candidates.
       
@@ -142,7 +143,10 @@ ${JSON.stringify(searchResults, null, 2)}
             }
         }
 
-        console.error("No JSON array found in AI response:", text);
+        if (candidates.length === 0) {
+            console.log(`[AI Discovery] Rejection: No candidates for ${name} matched context "${keywords || 'General'}" across ${searchResults.length} results.`);
+        }
+
         return [];
     } catch (error) {
         console.error("AI Service Error (Hang/Timeout/Failure):", error.message);

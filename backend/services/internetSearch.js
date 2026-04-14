@@ -14,13 +14,13 @@ dotenv.config();
 export async function searchWithDorks(dorks, numPerQuery = 10) {
     if (!dorks || dorks.length === 0) return [];
 
-    const apiKey = process.env.SERPER_API_KEY;
+    const apiKey = (process.env.SERPER_API_KEY || "").trim();
     if (!apiKey) {
         console.error('[Dorking] SERPER_API_KEY not configured');
         return [];
     }
 
-    console.log(`[Dorking] Executing ${dorks.length} dork queries...`);
+    // console.log(`[Dorking] Executing ${dorks.length} dork queries...`);
 
     const promises = dorks.map(async (dork, index) => {
         try {
@@ -28,7 +28,7 @@ export async function searchWithDorks(dorks, numPerQuery = 10) {
             // We cap at 256 to be safe and avoid 400 Bad Request
             const safeDork = dork.length > 256 ? dork.substring(0, 256).trim() : dork;
             
-            console.log(`  [Dork ${index + 1}] ${safeDork.slice(0, 80)}...`);
+            // console.log(`  [Dork ${index + 1}] ${safeDork.slice(0, 80)}...`);
             const response = await axios.post('https://google.serper.dev/search', {
                 q: safeDork,
                 num: numPerQuery
@@ -41,7 +41,7 @@ export async function searchWithDorks(dorks, numPerQuery = 10) {
             });
 
             const results = response.data?.organic || [];
-            console.log(`  [Dork ${index + 1}] Got ${results.length} results`);
+            // console.log(`  [Dork ${index + 1}] Got ${results.length} results`);
 
             return results.map((item, i) => ({
                 id: `dork-${index}-${i}`,
@@ -93,7 +93,7 @@ export async function searchInternet(query) {
             method: 'post',
             url: 'https://google.serper.dev/search',
             headers: {
-                'X-API-KEY': process.env.SERPER_API_KEY,
+                'X-API-KEY': (process.env.SERPER_API_KEY || "").trim(),
                 'Content-Type': 'application/json'
             },
             data: data
@@ -212,7 +212,7 @@ export async function searchImages(query, targetName = "", contextKeywords = [])
             method: 'post',
             url: 'https://google.serper.dev/images',
             headers: {
-                'X-API-KEY': process.env.SERPER_API_KEY,
+                'X-API-KEY': (process.env.SERPER_API_KEY || "").trim(),
                 'Content-Type': 'application/json'
             },
             data: data

@@ -7,7 +7,7 @@ import { sqliteSearch } from "../db/sqlite.js";
 import { identifyPeople, generateText, verifyIdentityMatch } from "../services/aiService.js";
 import { extractSocialAccounts, supportedPlatformDomains } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
-import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName } from "../utils/searchHelper.js";
+import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName, intelligentSplit } from "../utils/searchHelper.js";
 
 // Helper: Identify synthetic/placeholder data patterns that should NEVER be used for merging or displayed as 'Verified'
 function isPlaceholder(value) {
@@ -253,13 +253,20 @@ function buildSafeBuckets(baseQuery, domains, maxSites = 3) {
  * Helper: Execution wrapper for Serper with automatic 400-retry split.
  */
 async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = false) {
-    // TIGHTENING: Strip local quotes
-    const cleanBase = baseQuery.replace(/"/g, "").trim();
-    // SYNTAX FIX: No parentheses for single-domain queries
+    // TIGHTENING: Identify name parts for precise quoting
+    const apiKey = (process.env.SERPER_API_KEY || "").trim();
+    
+    // LOGIC FIX: Separate "Exact Name" from "Fuzzy Keywords"
+    // baseQuery often looks like: "dhruvil jain" cyhex
+    const namePart = (baseQuery.match(/"([^"]+)"/) || [null, baseQuery])[1].trim();
+    const keywordPart = baseQuery.replace(`"${namePart}"`, "").replace(/"/g, "").trim();
+    
     const siteFilter = domains.length > 1
         ? `(${domains.map(d => `site:${d}`).join(" OR ")})`
         : `site:${domains[0]}`;
-    const q = `"${cleanBase}" ${siteFilter}`.trim();
+        
+    // RECONSTRUCTION: "${Name}" Keyword site:...
+    const q = `"${namePart}" ${keywordPart} ${siteFilter}`.trim();
     
     // DIAGNOSTICS: Unique label for concurrency tracing
     const requestId = Math.random().toString(36).slice(-4);
@@ -268,7 +275,7 @@ async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = f
     try {
         console.time(label);
         const response = await axios.post("https://google.serper.dev/search", { q, num }, {
-            headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
+            headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
             timeout: 30000
         });
         console.timeEnd(label);
@@ -289,7 +296,7 @@ async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = f
             return [...res1, ...res2];
         }
         
-        console.error(`[Serper] Search failed: ${err.message} | Query: ${q}`);
+        console.error(`[Serper] Search failed: ${err.message} | Response: ${JSON.stringify(err.response?.data || "No body")} | Query: ${q}`);
         return [];
     }
 }
@@ -377,31 +384,20 @@ export async function performSearch(query, simpleMode = false, identityContext =
     try {
         if (!simpleMode) {
             // RE-ARCHITECTURE: Dynamic Safe Bucketing
-            // 1. Prioritize Gold Domains
-            const goldDomains = ['linkedin.com/in/', 'en.wikipedia.org', 'twitter.com', 'x.com', 'instagram.com', 'facebook.com'];
-            const otherDomains = supportedPlatformDomains.filter(d => !goldDomains.includes(d));
+            const goldDomains = ['linkedin.com/in/', 'en.wikipedia.org', 'twitter.com', 'x.com', 'facebook.com'];
+            const otherDomains = supportedPlatformDomains.filter(d => !goldDomains.includes(d) && d !== 'instagram.com');
 
-            // 2. Build Safe Clusters (Max 3 sites / <200 chars)
             const goldBuckets = buildSafeBuckets(internetQuery, goldDomains, 3);
-            const otherBuckets = buildSafeBuckets(internetQuery, otherDomains, 3);
-            
-            console.log(`[Serper] Parallel Discovery: Executing ${goldBuckets.length} Gold and ${otherBuckets.length} Silver buckets...`);
-
-            // 3. Execute with Safety Wrapper (Promise.allSettled for overall route stability)
+            const otherBuckets = buildSafeBuckets(internetQuery, otherDomains, 3);            // 3. Execute with Batch Pacing (Prevents Burst 400 errors)
             const allBuckets = [...goldBuckets, ...otherBuckets];
-            const searchPromises = allBuckets.map(bucket => 
-                performSafeSerperSearch(internetQuery, bucket, isRefinement ? 50 : 30, isRefinement)
-            );
+            const internetRes = await batchWithPacing(allBuckets, async (bucket) => {
+                if (options.signal && options.signal()) return [];
+                return performSafeSerperSearch(internetQuery, bucket, isRefinement ? 25 : 15, isRefinement);
+            }, 3, 400); // 3 buckets at a time with 400ms delay
 
-            const settleResults = await Promise.allSettled(searchPromises);
-            
-            // 4. Flatten and Deduplicate
-            const allOrganic = settleResults
-                .filter(r => r.status === 'fulfilled')
-                .flatMap(r => r.value);
-
-            const seenLinks = new Set();
-            internetResults = allOrganic.filter(item => {
+            internetResults = internetRes.flat();
+    const seenLinks = new Set();
+            internetResults = internetResults.filter(item => {
                 const link = item.link || "";
                 if (link && !seenLinks.has(link)) {
                     seenLinks.add(link);
@@ -419,9 +415,9 @@ export async function performSearch(query, simpleMode = false, identityContext =
             console.time(label);
             const response = await axios.post("https://google.serper.dev/search", {
                 q: internetQuery,
-                num: isRefinement ? 80 : 60
+                num: isRefinement ? 30 : 20
             }, {
-                headers: { "X-API-KEY": process.env.SERPER_API_KEY, "Content-Type": "application/json" },
+                headers: { "X-API-KEY": (process.env.SERPER_API_KEY || "").trim(), "Content-Type": "application/json" },
                 timeout: 25000
             });
             console.timeEnd(label);
@@ -443,7 +439,7 @@ export async function performSearch(query, simpleMode = false, identityContext =
             const titleLower = title.toLowerCase();
             const targetNameStr = targetName.toLowerCase();
 
-            console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
+            // console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
 
             // 0. Provider Labeling (Before filters)
             if (link.includes("linkedin.com")) provider = "LinkedIn";
@@ -586,17 +582,7 @@ export async function performSearch(query, simpleMode = false, identityContext =
                 }
             }
 
-            processedInternet.push({
-                id: `google - ${index} `,
-                title: item.title || "Untitled Result",
-                text: item.snippet || "No description available",
-                url: item.link || "",
-                source: "Internet",
-                provider: provider,
-                type: "AUX",
-                priority: provider === "LinkedIn" ? 1 : 3, // Elevate LinkedIn to Primary status
-                images: item.imageUrl ? [item.imageUrl] : []
-            });
+            // console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
         });
         
         internetResults = processedInternet;
@@ -648,52 +634,78 @@ export async function performSearch(query, simpleMode = false, identityContext =
  * Prioritizes Local Data.
  */
 router.post("/identify", async (req, res) => {
-    console.log("[Identify] Endpoint Hit");
+    let isAborted = false;
+    req.on("close", () => {
+        isAborted = true;
+    });
+
     const { name, location, keywords, number, isRefinement } = req.body;
-    if (!name) {
+
+    // --- SECURITY SHIELD: Length & Injection Guard ---
+    const injectionPattern = /<script|eval\(|javascript:|data:|vbscript:|onSubmit|onMouse|onError|onload/i;
+    const combinedInput = `${name || ""} ${keywords || ""} ${location || ""}`;
+    
+    if (injectionPattern.test(combinedInput)) {
+        console.warn(`[Security] Blocked potential injection attempt: ${combinedInput}`);
+        return res.status(403).json({ error: "Unsafe input detected" });
+    }
+
+    // Hard Truncation (Safety for external APIs)
+    const safeName = (name || "").substring(0, 30).trim();
+    const safeKeywords = (keywords || "").substring(0, 30).trim();
+    const safeLocation = (location || "").substring(0, 30).trim();
+
+    if (!safeName) {
         return res.status(400).json({ error: "Search query is required" });
     }
 
+    // --- INTELLIGENT SPLIT & SANITIZATION: Clean all inputs ---
+    let finalName = normalizeName(safeName);
+    let finalKeywords = normalizeName(safeKeywords);
+    const safeNumber = normalizePhoneNumber(number || "");
+
+    if (!finalKeywords && !safeNumber) {
+        const split = intelligentSplit(safeName);
+        if (split.keywords) {
+            finalName = normalizeName(split.name);
+            finalKeywords = normalizeName(split.keywords);
+            console.log(`[Identify] Auto-split & Cleaned -> Name: "${finalName}" | Keywords: "${finalKeywords}"`);
+        }
+    }
+
     // EVIDENCE-CACHE: Prevents collisions and supports logic versioning
-    const normQuery = `n:${normalize(name)}|k:${normalize(keywords || "")}|l:${normalize(location || "")}|p:${normalize(number || "")}|v:${LOGIC_VERSION}`;
+    const normQuery = `n:${finalName}|k:${finalKeywords || ""}|l:${normalize(safeLocation || "")}|p:${safeNumber}|v:${LOGIC_VERSION}`;
 
     try {
 
         // EVIDENCE-CACHE: Prevents collisions and supports logic versioning.
         // We now use the exact Search Context (Name + Keywords + Location) for the raw-search cache key.
         // This ensures a refined search (with keywords) bypasses a stale "name-only" empty result.
-        const inputType = detectInputType(name);
-        console.log(`[Identify] Detected Type: ${inputType} | Query: ${name} | Keyword: ${keywords} | Number: ${number} `);
+        const inputType = detectInputType(finalName);
+        // console.log(`[Identify] Detected Type: ${inputType} | Query: ${finalName} | Keyword: ${finalKeywords} | Number: ${safeNumber} `);
 
-        const searchQuery = number || name;
-        const searchType = number ? "PHONE" : inputType;
+        const searchQuery = safeNumber || finalName;
+        const searchType = safeNumber ? "PHONE" : inputType;
 
         // Identity Context for search enrichment and filtering
-        const identityContext = { name, location, keywords, number };
+        const identityContext = { name: finalName, location: safeLocation, keywords: finalKeywords, number: safeNumber };
 
         // Prepare internet query early constraint
         let internetQuery = "";
         if (inputType === "NAME") {
-            const profileSites = [
-                "site:linkedin.com/in/", "site:instagram.com", "site:facebook.com",
-                "site:twitter.com", "site:x.com", "site:crunchbase.com/person/",
-                "site:en.wikipedia.org", "site:imdb.com/name/"
-            ].join(" OR ");
-
             // PIVOT: If keywords or location are provided, we lead with a BROAD search to find the niche profile
-            // otherwise we lead with a SOCIAL-RESTRICTED parallel search (via performSearch buckets).
-            if (keywords || location) {
-                internetQuery = `"${name}" ${location || ""} ${keywords || ""}`;
+            if (finalKeywords || safeLocation) {
+                internetQuery = `"${finalName}" ${safeLocation || ""} ${finalKeywords || ""}`;
             } else {
-                internetQuery = name; // Let performSearch buckets handle social site restrictions!
+                internetQuery = finalName; // Let performSearch buckets handle social site restrictions!
             }
         } else {
-            internetQuery = `"${name}" OR "${normalizePhoneNumber(name)}"`;
+            console.log(`[Identify] Phone Search Detected. Routing to Local Sources only.`);
+            internetQuery = ""; // No internet query for phone numbers
         }
 
-        console.log(`[Identify] Processing identity search: "${name}" | Keyword: "${keywords || "none"}" | Number: "${number || "none"}"`);
-        console.log(`[Identify] Internet Query: ${internetQuery}`);
-        console.log(`[Identify] Executing parallel searches for local records and internet...`);
+        console.log(`[Identify] Target: ${finalName}${finalKeywords ? ` | Key: ${finalKeywords}` : ""}`);
+        // console.log(`[Identify] Internet Query: ${internetQuery}`);
 
         // 1. Parallel execution for local storage and internet
         const [csvResults, sqliteResults, dbResults, internetRes] = await Promise.all([
@@ -701,63 +713,55 @@ router.post("/identify", async (req, res) => {
             Promise.resolve().then(() => sqliteSearch(searchQuery)).catch(e => { console.error("[SQLite] err:", e.message); return []; }),
             Document.find({ text: { $regex: searchQuery, $options: "i" } }).limit(10).lean().catch(e => { console.warn("[MongoDB] Identify failed:", e.message); return []; }),
             (async () => {
-                const searchTaskPromises = [];
-
-                // WAVE 1: Standard Internet Discovery (Social Buckets)
-                searchTaskPromises.push(
-                    performSearch(internetQuery, false, identityContext, isRefinement, { skipLocal: true })
-                        .catch(e => { console.error("[Identify] Social Wave fail:", e.message); return []; })
-                );
-
-                // WAVE 2: Wide-Net Discovery (Unrestricted Google Search)
-                // Triggered if keywords/location exist to catch mentions outside social platforms
-                if (keywords || location) {
-                    const wideQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
-                    searchTaskPromises.push(
-                        performSearch(wideQuery, true, identityContext, isRefinement, { skipLocal: true })
-                            .catch(e => { console.error("[Identify] Wide Wave fail:", e.message); return []; })
-                    );
+                // BLOCK: External API Firewall for Phone Numbers
+                if (searchType === "PHONE") {
+                    return []; // Securely exit internet discovery for phone inputs
                 }
 
-                // WAVE 3: Keyword-Priority Discovery
-                if (keywords && inputType === "NAME") {
-                    const keywordQuery = `"${keywords}" "${name}"`.trim();
-                    searchTaskPromises.push(
-                        performSearch(keywordQuery, true, identityContext, true, { skipLocal: true })
-                            .catch(e => { console.error("[Identify] Keyword Wave fail:", e.message); return []; })
-                    );
-                }
+                // WAVE 1: Standard Internet Discovery (Social Buckets - Name Only)
+                // DIAGNOSTIC FIX: Temporarily forcing simpleMode=true to bypass bucket 400 errors
+                const socialRes = await performSearch(internetQuery, true, identityContext, isRefinement, { skipLocal: true, signal: () => isAborted })
+                    .catch(e => { console.error("[Identify] Social Wave fail:", e.message); return []; });
+                if (isAborted) return [];
 
-                const searchTaskResults = await Promise.all(searchTaskPromises);
-                
-                // Merge and URL-Deduplicate
                 let sRes = [];
                 const seenUrls = new Set();
-
-                searchTaskResults.forEach(resultSet => {
-                    (resultSet || []).forEach(item => {
+                const addResults = (results) => {
+                    (results || []).forEach(item => {
                         const url = (item.url || "").toLowerCase().trim();
                         if (url && !seenUrls.has(url)) {
                             seenUrls.add(url);
                             sRes.push(item);
                         }
                     });
-                });
+                };
 
-                console.log(`[Identify] Parallel Discovery complete. Total Unique Sources: ${sRes.length}`);
+                addResults(socialRes);
+
+                // FALLBACK: If few results, trigger Wide-Net and Keyword discovery
+                if (sRes.length < 3 && (keywords || location)) {
+                    console.log(`[Identify] Insufficient name results (${sRes.length}). Triggering keyword fallback...`);
+                    const wideQuery = `${name} ${location || ""} ${keywords || ""}`.trim();
+                    const wideRes = await performSearch(wideQuery, true, identityContext, isRefinement, { skipLocal: true, signal: () => isAborted })
+                        .catch(e => []);
+                    addResults(wideRes);
+
+                    if (sRes.length < 5 && keywords && inputType === "NAME") {
+                        const keywordQuery = `"${name}" ${keywords}`.trim();
+                        const kwRes = await performSearch(keywordQuery, true, identityContext, true, { skipLocal: true, signal: () => isAborted })
+                            .catch(e => []);
+                        addResults(kwRes);
+                    }
+                }
+
+                // console.log(`[Identify] Parallel Discovery complete. Total Unique Sources: ${sRes.length}`);
 
                 // Broaden search ONLY if still extremely few results for a name
                 if (sRes.length < 3 && inputType === "NAME") {
                     console.log(`[Identify] Insufficient results (${sRes.length}). Triggering targeted broad sweep.`);
                     const broadQuery = `${name} ${location || ""} ${keywords || ""} profile biography official site`.trim();
-                    const broadRes = await performSearch(broadQuery, true, identityContext, isRefinement, { skipLocal: true }).catch(e => []);
-                    (broadRes || []).forEach(item => {
-                        const url = (item.url || "").toLowerCase().trim();
-                        if (url && !seenUrls.has(url)) {
-                            seenUrls.add(url);
-                            sRes.push(item);
-                        }
-                    });
+                    const broadRes = await performSearch(broadQuery, true, identityContext, isRefinement, { skipLocal: true, signal: () => isAborted }).catch(e => []);
+                    addResults(broadRes);
                 }
 
                 return (sRes || []).map(r => ({
@@ -1072,7 +1076,7 @@ router.post("/identify", async (req, res) => {
 
             // 3. Title Keyword check (only if not a main profile)
             if (postTitlePatterns.some(pattern => pattern.test(title)) || postTitlePatterns.some(pattern => pattern.test(desc))) {
-                console.log(`[Filter] Removed as post content: ${candidate.name}`);
+                // console.log(`[Filter] Removed as post content: ${candidate.name}`);
                 return true;
             }
 
@@ -1127,8 +1131,27 @@ router.post("/identify", async (req, res) => {
  * Prioritizes Local Data.
  */
 router.post("/deep", async (req, res) => {
+    let isAborted = false;
+    req.on("close", () => {
+        isAborted = true;
+        console.log("[Deep Search] Request closed by client. Aborting.");
+    });
+
     const { person } = req.body;
     if (!person || !person.name) return res.status(400).json({ error: "Person data required" });
+
+    // --- SECURITY SHIELD: Length & Injection Guard ---
+    const injectionPattern = /<script|eval\(|javascript:|data:|vbscript:|onSubmit|onMouse|onError|onload/i;
+    const combinedInput = `${person.name || ""} ${person.keywords || ""} ${person.location || ""}`;
+    
+    if (injectionPattern.test(combinedInput)) {
+        return res.status(403).json({ error: "Unsafe input detected" });
+    }
+
+    // Force truncation for external APIS
+    person.name = person.name.substring(0, 30);
+    if (person.keywords) person.keywords = person.keywords.substring(0, 30);
+    if (person.location) person.location = person.location.substring(0, 30);
 
     // Clean name and keyword
     let name = person.name || "";
@@ -1311,14 +1334,14 @@ router.post("/deep", async (req, res) => {
             globalSweepResults,
             enrichmentResult
         ] = await Promise.all([
-            performSearch(socialQueryStrict, true, identityContext).catch(() => []),
-            performSearch(socialQueryBroad, true, identityContext).catch(() => []),
-            performSearch(contextQueryBroad, true, identityContext).catch(() => []),
+            performSearch(socialQueryStrict, true, identityContext, false, { signal: () => isAborted }).catch(() => []),
+            performSearch(socialQueryBroad, true, identityContext, false, { signal: () => isAborted }).catch(() => []),
+            performSearch(contextQueryBroad, true, identityContext, false, { signal: () => isAborted }).catch(() => []),
             searchImages(imageQuery, name, contextKeywordsList).catch(() => []),
             searchWikipedia(name).catch(() => null),
             searchWithDorks(tier1Dorks, 10).catch(() => []),
             searchWithDorks(generateDocumentDorks(dorkParams), 10).catch(() => []),
-            performSearch(globalIdentityQuery, true, identityContext).catch(() => []),
+            performSearch(globalIdentityQuery, true, identityContext, false, { signal: () => isAborted }).catch(() => []),
             enrichContact(name, keyword || profession, targetDomain).catch(e => {
                 console.error("[Enrich] Deep failure:", e.message);
                 return null;

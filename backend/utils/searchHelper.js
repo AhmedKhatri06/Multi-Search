@@ -17,6 +17,7 @@ export function detectInputType(query) {
 
 /**
  * Normalizes a name for entity resolution by stripping titles, suffixes, and symbols.
+ * LAYERED CLEANING: Handles labels, noise, and preserves word order.
  * @param {string} name 
  * @returns {string}
  */
@@ -26,16 +27,23 @@ export function normalizeName(name) {
     // 1. Convert to lowercase and trim
     let n = name.toLowerCase().trim();
 
-    // 2. Handle common separators - if there's a dash, pipe, or comma, 
-    // the name is usually BEFORE the separator.
-    const separators = [" - ", " | ", " , ", " at ", " @ "];
+    // 2. Hard-Separator Split (Colon/Semicolon)
+    // "Name: John Doe" -> "John Doe"
+    if (n.includes(":")) n = n.split(":")[1].trim();
+    if (n.includes(";")) n = n.split(";")[1].trim();
+
+    // 3. Noise Stripping (Punctuation/Trailing garbage)
+    n = n.replace(/[!?,.\-]/g, " ").replace(/\s+/g, " ").trim();
+
+    // 4. Handle common contextual separators 
+    const separators = [" at ", " @ ", " from ", " in ", " [", " ("];
     separators.forEach(sep => {
         if (n.includes(sep)) {
             n = n.split(sep)[0].trim();
         }
     });
 
-    // 3. Remove common titles and suffixes (e.g., Mr., Dr., CEO, Founder)
+    // 5. Remove common titles and suffixes (e.g., Mr., Dr., CEO, Founder)
     const junkPatterns = [
         /\b(mr|mrs|ms|dr|prof|sir|lord)\.?\s+/gi,
         /\b(ceo|cto|cfo|md|phd|manager|director|founder|co-founder|student|engineer|developer|associates|lead|author|contributor)\b/gi,
@@ -48,18 +56,72 @@ export function normalizeName(name) {
         n = n.replace(pattern, " ");
     });
 
-    // 4. Compact whitespace and sort words 
-    return n.split(/\s+/).filter(word => word.length > 1).sort().join(" ").trim();
+    // 6. Final Clean - No word sorting (preserves 'Shah Dhruv' vs 'Dhruv Shah' preference)
+    return n.replace(/\s+/g, " ").trim();
 }
 
 /**
- * Normalizes a phone number to a standard format (e.g., 91XXXXXXXXXX).
+ * Normalizes a phone number to standard E.164-ish format (+91XXXXXXXXXX).
+ * Handles '00' prefix and aggressive numeric stripping while preserving leading '+'.
  * @param {string} phone 
  * @returns {string}
  */
 export function normalizePhoneNumber(phone) {
     if (!phone) return "";
-    return phone.replace(/\D/g, "");
+    
+    let p = phone.trim();
+    // 1. Replace starting 00 with + (international standard)
+    if (p.startsWith("00")) p = "+" + p.substring(2);
+
+    // 2. Strip all non-numeric except leading +
+    const hasPlus = p.startsWith("+");
+    const digits = p.replace(/\D/g, "");
+
+    return hasPlus ? "+" + digits : digits;
+}
+
+/**
+ * Intelligent Extraction: Decides what is a NAME and what are KEYWORDS.
+ * Use Heuristics (Word count & Pivot words).
+ * @param {string} input 
+ * @returns {{name: string, keywords: string}}
+ */
+export function intelligentSplit(input) {
+    if (!input) return { name: "", keywords: "" };
+
+    const cleanInput = input.replace(/\s+/g, " ").trim();
+    const words = cleanInput.split(" ");
+    
+    // HEURISTIC 1: Detect Pivot Words
+    const pivots = [" at ", " of ", " from ", " in ", " @ "];
+    for (const pivot of pivots) {
+        if (cleanInput.toLowerCase().includes(pivot)) {
+            const parts = cleanInput.split(new RegExp(pivot, "i"));
+            return {
+                name: parts[0].trim(),
+                keywords: (pivot.trim() + " " + parts.slice(1).join(pivot).trim()).trim()
+            };
+        }
+    }
+
+    // HEURISTIC 2: Detect Field labels like ":" 
+    if (cleanInput.includes(":")) {
+        const parts = cleanInput.split(":");
+        return {
+            name: parts[0].trim(),
+            keywords: parts.slice(1).join(":").trim()
+        };
+    }
+
+    // HEURISTIC 3: Word count based (Name is usually first 2-3 words)
+    if (words.length > 2) {
+        return {
+            name: words.slice(0, 2).join(" "),
+            keywords: words.slice(2).join(" ")
+        };
+    }
+
+    return { name: cleanInput, keywords: "" };
 }
 
 /**

@@ -16,7 +16,7 @@ export async function initCSVService() {
         return;
     }
 
-    const MAX_FILE_SIZE_MB = 2;
+    const MAX_FILE_SIZE_MB = 50;
     const files = fs.readdirSync(SCRIPTS_DIR).filter(file => {
         if (!file.endsWith('.csv')) return false;
         const stats = fs.statSync(path.join(SCRIPTS_DIR, file));
@@ -32,7 +32,9 @@ export async function initCSVService() {
 
     for (const file of files) {
         const filePath = path.join(SCRIPTS_DIR, file);
+        const countBefore = csvCache.length;
         await loadCSVIntoMemory(filePath, file);
+        console.log(`[CSV Search] Indexed ${file}: +${csvCache.length - countBefore} records.`);
     }
 
     isInitialized = true;
