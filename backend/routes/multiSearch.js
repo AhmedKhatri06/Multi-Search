@@ -4,10 +4,11 @@ import axios from "axios";
 import FormInfo from "../models/FormInfo.js";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
+import SearchCache from "../models/SearchCache.js";
 import { identifyPeople, generateText, verifyIdentityMatch } from "../services/aiService.js";
 import { extractSocialAccounts, supportedPlatformDomains } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
-import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName, intelligentSplit } from "../utils/searchHelper.js";
+import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName, intelligentSplit, cleanRawQuery } from "../utils/searchHelper.js";
 
 // Helper: Identify synthetic/placeholder data patterns that should NEVER be used for merging or displayed as 'Verified'
 function isPlaceholder(value) {
@@ -28,6 +29,7 @@ import { matchInstagramProfiles } from "../services/instagramMatcher.js";
 import instagramService from "../services/instagramService.js";
 import { enrichContact } from "../services/enrichmentService.js";
 import { extractContactInfo } from "../services/contactService.js";
+import { maskEmail, maskPhone } from "../utils/privacy.js";
 
 dotenv.config();
 
@@ -262,8 +264,8 @@ async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = f
     const keywordPart = baseQuery.replace(`"${namePart}"`, "").replace(/"/g, "").trim();
     
     const siteFilter = domains.length > 1
-        ? `(${domains.map(d => `site:${d}`).join(" OR ")})`
-        : `site:${domains[0]}`;
+        ? `(${domains.map(d => `site:${d.split('/')[0]}`).join(" OR ")})`
+        : `site:${domains[0].split('/')[0]}`;
         
     // RECONSTRUCTION: "${Name}" Keyword site:...
     const q = `"${namePart}" ${keywordPart} ${siteFilter}`.trim();
@@ -272,31 +274,53 @@ async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = f
     const requestId = Math.random().toString(36).slice(-4);
     const label = `[Serper] Bucket (${domains.length} sites): ${requestId}`;
 
+    // MODULE 8: Reliable Serper Wrapper with Network Retry (Mitigate 'socket hang up')
+    const executeRequest = async (retryCount = 0) => {
+        try {
+            const response = await axios.post("https://google.serper.dev/search", { q, num }, {
+                headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+                timeout: 30000
+            });
+            return response;
+        } catch (err) {
+            const isNetworkError = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message.includes('hang up');
+            if (retryCount < 1 && isNetworkError) {
+                console.warn(`[Serper] Network retry (${retryCount + 1}) for: ${q.slice(0, 50)}...`);
+                return executeRequest(retryCount + 1);
+            }
+            throw err;
+        }
+    };
+
     try {
         console.time(label);
-        const response = await axios.post("https://google.serper.dev/search", { q, num }, {
-            headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-            timeout: 30000
-        });
+        const response = await executeRequest();
         console.timeEnd(label);
         return response.data?.organic || [];
     } catch (err) {
         console.timeEnd(label);
         // RETRY LOGIC: If 400 Bad Request (Length/Complexity), split and retry
-        if (err.response?.status === 400 && domains.length > 1) {
-            console.warn(`[Serper] Query rejected (400). Splitting bucket of ${domains.length} [ref:${requestId}]...`);
-            const mid = Math.ceil(domains.length / 2);
-            const left = domains.slice(0, mid);
-            const right = domains.slice(mid);
-            
-            const [res1, res2] = await Promise.all([
-                performSafeSerperSearch(baseQuery, left, num, isRefinement),
-                performSafeSerperSearch(baseQuery, right, num, isRefinement)
-            ]);
-            return [...res1, ...res2];
+        if (err.response?.status === 400) {
+            if (domains.length > 1) {
+                console.warn(`[Serper] Query rejected (400). Splitting bucket of ${domains.length} [ref:${requestId}]...`);
+                const mid = Math.ceil(domains.length / 2);
+                const left = domains.slice(0, mid);
+                const right = domains.slice(mid);
+                
+                const [res1, res2] = await Promise.all([
+                    performSafeSerperSearch(baseQuery, left, num, isRefinement),
+                    performSafeSerperSearch(baseQuery, right, num, isRefinement)
+                ]);
+                return [...res1, ...res2];
+            } else {
+                // EMERGENCY FALLBACK: If a single domain still fails with 400 (rare),
+                // run a broad search for the name only to prevent a complete dashboard failure.
+                console.warn(`[Serper] Emergency Fallback: Single domain bucket failed [ref:${requestId}]. Retrying broad search...`);
+                return performSearch(baseQuery, true, null, true, { skipLocal: true });
+            }
         }
         
-        console.error(`[Serper] Search failed: ${err.message} | Response: ${JSON.stringify(err.response?.data || "No body")} | Query: ${q}`);
+        console.error(`[Serper] Search failed: ${err.message} | Query: ${q}`);
         return [];
     }
 }
@@ -309,15 +333,19 @@ export async function performSearch(query, simpleMode = false, identityContext =
     const targetName = identityContext?.name || "";
     const normQuery = normalize(query);
 
-    /* 
-    // Check Cache
-    const cacheType = simpleMode ? "SEARCH" : "SEARCH"; 
-    const cached = await SearchCache.findOne({ query: normQuery, type: cacheType });
-    if (cached) {
-      console.log(`[CACHE HIT] ${ cacheType }: "${normQuery}"`);
-      return cached.data;
+    // MODULE 8: Performance / Cost Optimization (Caching)
+    const cacheKey = `q:${sanitizeQuery(query).toLowerCase()}|simple:${!!simpleMode}`;
+    if (!isRefinement) {
+        try {
+            const cached = await SearchCache.findOne({ query: cacheKey });
+            if (cached && cached.results?.length > 0 && (Date.now() - new Date(cached.timestamp).getTime()) < 24 * 60 * 60 * 1000) {
+                console.log(`[Cache Hit] Serving ${cached.results.length} internet results for: ${query}`);
+                return cached.results;
+            }
+        } catch (e) {
+            console.warn("[Cache] Lookup failed:", e.message);
+        }
     }
-    */
 
     // Extract query parts early for scope availability
     const localSearchQuery = query.split("(")[0].replace(/site:\S+/g, "").trim();
@@ -370,7 +398,10 @@ export async function performSearch(query, simpleMode = false, identityContext =
     }
 
     internetQuery = sanitizeQuery(query);
-    if (sqliteResults && sqliteResults.length > 0) {
+    // MODULE 3: "Person Not Found" Hard Reset
+    // If this is a refinement search, we explicitly IGNORE local shortcuts to ensure a fresh internet search
+    // based on the user's manual correction, rather than potentially incorrect data from previous hits.
+    if (!isRefinement && sqliteResults && sqliteResults.length > 0) {
         const p = sqliteResults[0];
         const parts = (p.text || "").split(" - ");
         const rowName = parts[0]?.trim() || "";
@@ -428,6 +459,19 @@ export async function performSearch(query, simpleMode = false, identityContext =
 
         const results = internetResults;
         const processedInternet = [];
+
+        // MODULE 8: Save to Cache for and follow-up reuse
+        if (results.length > 0) {
+            try {
+                await SearchCache.findOneAndUpdate(
+                    { query: cacheKey },
+                    { results, timestamp: new Date() },
+                    { upsert: true }
+                );
+            } catch (e) {
+                console.warn("[Cache] Save failed:", e.message);
+            }
+        }
 
         results.forEach((item, index) => {
             let provider = "Google";
@@ -488,14 +532,17 @@ export async function performSearch(query, simpleMode = false, identityContext =
                         const lastChar = preceedingText.slice(-1);
 
                         if (!separators.some(sep => sep.trim() === lastChar || preceedingText.endsWith(sep))) {
-                            const allowedPrefixes = ["mr", "mr.", "dr", "dr.", "prof", "user", "member", "student", "about", "images", "photos", "profile", "view", "contact", "biography", "bio", "follow", "visit", "see", "meet", "official", "verified", "account", "handle"];
+                            const allowedPrefixes = ["mr", "mr.", "dr", "dr.", "prof", "user", "member", "student", "about", "images", "photos", "profile", "view", "contact", "biography", "bio", "follow", "visit", "see", "meet", "official", "verified", "account", "handle", "linkedin", "meet"];
                             const wordsBefore = preceedingText.split(" ");
                             const wordBefore = wordsBefore[wordsBefore.length - 1];
 
-                            // Loosen: allow social handles (e.g., @elonmusk) and common markers
-                            if (wordBefore && !allowedPrefixes.includes(wordBefore) && !wordBefore.startsWith('@') && isNaN(wordBefore) && provider === "Google") {
-                                console.log(`[Filter] Dropped(Prefix '${wordBefore}'): ${title} `);
-                                return;
+                            // Loosen: Allow keywords as prefixes and only log unknown ones instead of dropping
+                            const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
+                            const isKeywordMatch = keywordsList.some(kw => wordBefore.includes(kw));
+
+                            if (wordBefore && !allowedPrefixes.includes(wordBefore) && !isKeywordMatch && !wordBefore.startsWith('@') && isNaN(wordBefore) && provider === "Google") {
+                                console.log(`[Filter] Weak Anchor (Prefix '${wordBefore}'): ${title} - Allowing with penalty`);
+                                // Note: We no longer 'return' here. We allow the result but it will naturally score lower if not boosted by keywords.
                             }
                         }
                     }
@@ -515,8 +562,8 @@ export async function performSearch(query, simpleMode = false, identityContext =
                             const wordAfter = wordsAfter[0];
 
                             if (wordAfter && !allowedSuffixes.includes(wordAfter) && !keywordsList.includes(wordAfter) && !wordAfter.startsWith('@') && !wordAfter.startsWith('(') && isNaN(wordAfter) && wordAfter.length > 1 && provider === "Google") {
-                                console.log(`[Filter] Dropped(Postfix '${wordAfter}'): ${title} `);
-                                return;
+                                console.log(`[Filter] Weak Anchor (Postfix '${wordAfter}'): ${title} - Allowing with penalty`);
+                                // Note: We no longer 'return' here.
                             }
                         }
                     }
@@ -659,13 +706,18 @@ router.post("/identify", async (req, res) => {
         return res.status(400).json({ error: "Search query is required" });
     }
 
-    // --- INTELLIGENT SPLIT & SANITIZATION: Clean all inputs ---
-    let finalName = normalizeName(safeName);
-    let finalKeywords = normalizeName(safeKeywords);
+    // --- MODULE 1: Clean → Split → Normalize ---
+    // 1. Clean raw input (noise removal)
+    const cleanedName = cleanRawQuery(safeName);
+    const cleanedKeywords = cleanRawQuery(safeKeywords);
     const safeNumber = normalizePhoneNumber(number || "");
 
+    // 2. Intelligent Split & Final Normalization
+    let finalName = normalizeName(cleanedName);
+    let finalKeywords = cleanedKeywords ? normalizeName(cleanedKeywords) : "";
+
     if (!finalKeywords && !safeNumber) {
-        const split = intelligentSplit(safeName);
+        const split = intelligentSplit(cleanedName);
         if (split.keywords) {
             finalName = normalizeName(split.name);
             finalKeywords = normalizeName(split.keywords);
@@ -1153,9 +1205,13 @@ router.post("/deep", async (req, res) => {
     if (person.keywords) person.keywords = person.keywords.substring(0, 30);
     if (person.location) person.location = person.location.substring(0, 30);
 
-    // Clean name and keyword
-    let name = person.name || "";
-    let keyword = person.keywordMatched || "";
+    // --- MODULE 1: Clean → Normalise ---
+    let name = cleanRawQuery(person.name || "");
+    let keyword = cleanRawQuery(person.keywordMatched || "");
+    
+    // Final normalization (strip remaining noise)
+    name = normalizeName(name);
+    keyword = normalizeName(keyword);
 
     // 1. Strip common separators and extract keyword if missing
     if (name.includes(" - ")) {
@@ -1385,6 +1441,19 @@ router.post("/deep", async (req, res) => {
         }
 
         const allSearchItems = [...socialResults, ...contextResults, ...dorkResults];
+        
+        // --- BASELINE DISCOVERY (Phase 2 Resilience) ---
+        // If Layer 1 anchors and dorks yielded nothing, trigger a fallback "Identity Hunt"
+        if (allSearchItems.length === 0) {
+            console.warn(`[Deep Search] No signals detected for ${name}. Triggering Baseline Discovery...`);
+            const fallbackQuery = `"${name}" ${cleanProfession} site:linkedin.com/in/ OR site:twitter.com OR site:github.com`.trim();
+            const discoveryResults = await performSearch(fallbackQuery, true, identityContext, true).catch(() => []);
+            if (discoveryResults.length > 0) {
+                console.log(`[Deep Search] Baseline Discovery found ${discoveryResults.length} new signals.`);
+                allSearchItems.push(...discoveryResults);
+            }
+        }
+
         console.log(`[Deep Search] Total search items (incl. dorks): ${allSearchItems.length}`);
 
         // 3. Robust Social Discovery using specialized service with anchors
@@ -1658,6 +1727,26 @@ router.post("/deep", async (req, res) => {
             extracted.emails.forEach(e => webEmails.add(e));
         });
 
+        const finalEmails = [...new Set([
+            ...(person.emails || []), 
+            ...(enrichmentResult?.emails || []), 
+            ...(enrichmentResult?.email ? [enrichmentResult.email] : []),
+            ...Array.from(localEmails), 
+            ...Array.from(webEmails)
+        ])].filter(e => !isPlaceholder(e));
+
+        const finalPhones = [...new Set([
+            ...(person.phoneNumbers || []), 
+            ...(enrichmentResult?.phones || []), 
+            ...(enrichmentResult?.phone ? [enrichmentResult.phone] : []),
+            ...Array.from(localPhones), 
+            ...Array.from(webPhones)
+        ])].filter(p => !isPlaceholder(p));
+
+        // MODULE 6: Apply PII Masking
+        const maskedEmails = finalEmails.map(maskEmail);
+        const maskedPhones = finalPhones.map(maskPhone);
+
         // PERMANENT STABILITY FIX: Return Layer 1 results immediately (Latency resolution)
         res.json({
             person: {
@@ -1665,20 +1754,10 @@ router.post("/deep", async (req, res) => {
                 name,
                 location: location || person.location,
                 description: finalDescription,
-                emails: [...new Set([
-                    ...(person.emails || []), 
-                    ...(enrichmentResult?.emails || []), 
-                    ...(enrichmentResult?.email ? [enrichmentResult.email] : []),
-                    ...Array.from(localEmails), 
-                    ...Array.from(webEmails)
-                ])].filter(e => !isPlaceholder(e)),
-                phoneNumbers: [...new Set([
-                    ...(person.phoneNumbers || []), 
-                    ...(enrichmentResult?.phones || []), 
-                    ...(enrichmentResult?.phone ? [enrichmentResult.phone] : []),
-                    ...Array.from(localPhones), 
-                    ...Array.from(webPhones)
-                ])].filter(p => !isPlaceholder(p)),
+                emails: maskedEmails,
+                phoneNumbers: maskedPhones,
+                unmaskedEmails: finalEmails, // Keeping for potential interior logic needs
+                unmaskedPhones: finalPhones,
                 enrichmentRecord: enrichmentResult
             },
             socials: socialProfiles,

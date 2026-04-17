@@ -124,7 +124,7 @@ function calculateIdentityScore(result, personName, options = {}) {
     // SURNAME ENFORCEMENT: If they have a surname, it MUST match for common sources.
     if (surname && !surnameMatched && !knownHandle) {
         console.log(`    [Identity Reject] Surname mismatch for ${platform}: ${link}`);
-        return 0; 
+        return 0;
     }
 
     // WIKIPEDIA ANCHORING: Strict Title/URL requirement for Wikipedia to avoid collision (e.g. Desai vs Doshi)
@@ -334,10 +334,10 @@ export function extractSocialAccounts(internetResults, personName, keywords = []
 }
 
 export const supportedPlatformDomains = [
-    'linkedin.com/in/', 'en.wikipedia.org', 'imdb.com/name/', 'github.com', 'twitter.com', 'x.com', 'instagram.com',
+    'linkedin.com', 'en.wikipedia.org', 'imdb.com', 'github.com', 'twitter.com', 'x.com', 'instagram.com',
     'facebook.com', 't.me/', 'tiktok.com', 'pinterest.com', 'youtube.com',
-    'snapchat.com', 'reddit.com', 'crunchbase.com/person/', 'medium.com',
-    'stackoverflow.com/users/', 'behance.net', 'dribbble.com', 'linktr.ee', 'about.me', 'bumble.com'
+    'snapchat.com', 'reddit.com', 'crunchbase.com', 'medium.com',
+    'stackoverflow.com', 'behance.net', 'dribbble.com', 'linktr.ee', 'about.me', 'bumble.com'
 ];
 
 export { calculateIdentityScore };

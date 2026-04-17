@@ -1,4 +1,32 @@
 /**
+ * Dictionaries for category-aware splitting.
+ * Words in these categories are strictly treated as KEYWORDS and removed from NAME candidates.
+ */
+const KEYWORD_TOKENS = {
+    roles: ['ceo', 'cto', 'cfo', 'md', 'phd', 'manager', 'director', 'founder', 'intern', 'engineer', 'developer', 'lead', 'associate', 'head', 'vp', 'president'],
+    orgs: ['ltd', 'pvt', 'limited', 'inc', 'corp', 'solutions', 'technologies', 'infotech', 'software', 'systems', 'labs', 'startup'],
+    titles: ['mr', 'mrs', 'ms', 'dr', 'prof', 'sir', 'lord']
+};
+
+/**
+ * Cleans raw query input by stripping special characters, extra spaces,
+ * and unwanted noise words like titles or common roles.
+ */
+export function cleanRawQuery(raw) {
+    if (!raw) return "";
+    let q = raw.trim();
+
+    // 1. Strip special symbols except basic space, hyphen, and dots
+    q = q.replace(/[^a-zA-Z0-9\s\-\.]/g, " ");
+
+    // 2. Normalize spaces
+    q = q.replace(/\s+/g, " ");
+
+    // 3. Optional: Strip leading/trailing noise that isn't part of identity
+    return q.trim();
+}
+
+/**
  * Detects if the input query is likely a phone number or a name.
  * @param {string} query 
  * @returns {"PHONE" | "NAME"}
@@ -82,7 +110,7 @@ export function normalizePhoneNumber(phone) {
 
 /**
  * Intelligent Extraction: Decides what is a NAME and what are KEYWORDS.
- * Use Heuristics (Word count & Pivot words).
+ * CATEGORY-AWARE: Uses role/org dictionaries + word count heuristics.
  * @param {string} input 
  * @returns {{name: string, keywords: string}}
  */
@@ -92,14 +120,14 @@ export function intelligentSplit(input) {
     const cleanInput = input.replace(/\s+/g, " ").trim();
     const words = cleanInput.split(" ");
     
-    // HEURISTIC 1: Detect Pivot Words
+    // HEURISTIC 1: Detect Pivot Words ("at", "from", "@", etc.)
     const pivots = [" at ", " of ", " from ", " in ", " @ "];
     for (const pivot of pivots) {
         if (cleanInput.toLowerCase().includes(pivot)) {
             const parts = cleanInput.split(new RegExp(pivot, "i"));
             return {
                 name: parts[0].trim(),
-                keywords: (pivot.trim() + " " + parts.slice(1).join(pivot).trim()).trim()
+                keywords: parts.slice(1).join(" ").trim()
             };
         }
     }
@@ -113,15 +141,40 @@ export function intelligentSplit(input) {
         };
     }
 
-    // HEURISTIC 3: Word count based (Name is usually first 2-3 words)
-    if (words.length > 2) {
+    // HEURISTIC 3: Category-Aware Word classification
+    // Walk through words. If we find a "Role" or "Org" token, everything from there is keyword.
+    const nameParts = [];
+    const keywordParts = [];
+    let hitKeyword = false;
+
+    for (const word of words) {
+        const lower = word.toLowerCase().replace(/[^a-z]/g, "");
+        const isRole = KEYWORD_TOKENS.roles.includes(lower);
+        const isOrgSuffix = KEYWORD_TOKENS.orgs.includes(lower);
+
+        if (!hitKeyword && (isRole || isOrgSuffix)) {
+            hitKeyword = true;
+            keywordParts.push(word);
+        } else if (hitKeyword) {
+            keywordParts.push(word);
+        } else {
+            nameParts.push(word);
+        }
+    }
+
+    // HEURISTIC 4: Fallback for "Ahmed Khatri CyHEX" (where CyHEX is not in dictionary but at end)
+    if (keywordParts.length === 0 && nameParts.length > 2) {
+        // Names are typically first 2 words. Remaining are context.
         return {
-            name: words.slice(0, 2).join(" "),
-            keywords: words.slice(2).join(" ")
+            name: nameParts.slice(0, 2).join(" "),
+            keywords: nameParts.slice(2).join(" ")
         };
     }
 
-    return { name: cleanInput, keywords: "" };
+    return { 
+        name: nameParts.join(" ").trim(), 
+        keywords: keywordParts.join(" ").trim() 
+    };
 }
 
 /**

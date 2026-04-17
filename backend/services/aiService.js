@@ -48,9 +48,9 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       Return a JSON array of distinct identity candidate objects.
       Each object MUST have:
       {
-          "name": "Strict Name Only (e.g. Sundar Pichai. NO titles like CEO or Dr.)",
-          "description": "EXTREMELY CONCISE tagline (Maximum 4-5 words. e.g. 'CEO at Google' or 'Student at Stanford')",
-          "location": "City, Country (if known)",
+          "name": "Full Name Only (e.g. Sundar Pichai. NO titles like CEO or Dr.)",
+          "description": "STRICT FORMAT: 'Role at Company' (e.g. 'Intern at CyHEX', 'CEO at Google', 'Student at Stanford'). Maximum 5 words. NEVER use long sentences.",
+          "location": "City, Country (if known, otherwise empty string)",
           "company": "Current organization (1-2 words. Be specific, e.g. 'CyHEX' or 'Credit Suisse')",
           "url": "A primary social or profile URL",
           "socials": [{"platform": "LinkedIn", "url": "..."}, {"platform": "Twitter", "url": "..."}],
@@ -60,13 +60,13 @@ export const identifyPeople = async ({ name, location, keywords, searchResults }
       
       IDENTITY INTEGRITY RULES:
       - **SURNAME INTEGRITY (CRITICAL)**: For names like 'Mihir Doshi', do NOT include results for 'Mihir Desai'. A surname mismatch is a completely different person.
-      - "name": MUST be ONLY the person's full name. 
-      - "description": Keep it extremely concise. 4-5 words maximum. Do NOT string multiple roles together.
+      - "name": MUST be ONLY the person's full name. No titles, no roles, no extra text.
+      - "description": MUST follow the pattern "Role at Company". Keep it extremely concise. 5 words maximum. Do NOT string multiple roles together. Do NOT use full sentences.
       
       Strategy: 
       - Use exact surname matching to distinguish between people with the same first name.
       - Prioritize profile links over news articles.
-      - Strictly return ONLY the JSON array. No markdown.
+      - Strictly return ONLY the JSON array. No markdown, no explanation text.
     `;
 
     const prompt = `
@@ -161,22 +161,27 @@ ${JSON.stringify(searchResults, null, 2)}
  * @returns {Promise<string>}
  */
 export const generateText = async (prompt) => {
-    const SUMMARY_SYSTEM_PROMPT = `You are an expert identity intelligence analyst. Your goal is to synthesize multiple data points into a high-quality, professional executive summary for an individual's dossier.
+    const SUMMARY_SYSTEM_PROMPT = `You are a senior Human Intelligence Analyst (HUMINT). Your goal is to generate a /humanize Narrative Summary for an identity dossier.
+    
+    REPORT STYLE: "Human Intelligence Report"
+    - Avoid robotic listing or metadata repetition.
+    - Focus on Narrative Synthesis: Connect the dots between their role, company (${prompt.includes('Focus Context') ? 'provided context' : 'social signals'}), and digital presence.
+    - Tone: Sophisticated, objective, and analytical.
     
     GUIDELINES:
-    1. **SYNTHESIS OVER REPETITION**: Do not simply list or copy-paste raw data from the sources. Connect the dots to explain WHO the person is, their professional trajectory, and their key areas of expertise.
-    2. **NATURAL LANGUAGE**: Use a sophisticated, professional tone. Avoid starting with lists.
+    1. **SYNTHESIS OVER REPETITION**: Do not simply list raw data. Explain WHO the person is and their professional trajectory.
+    2. **IDENTITY ANCHORING**: Focus purely on the person that matches the primary identity context.
     3. **STRUCTURE**:
-       - Paragraph 1: Core professional identity, current leadership role, and primary industry impact.
-       - Paragraph 2: Notable achievements, digital footprint, or academic/professional milestones found across the web.
-    4. **VISUAL CLARITY**: Use **bolding** for for names, key companies, and significant technologies.
-    5. **CLEAN OUTPUT**: Do not include any meta-tags like /human or /summary in the final output.`;
+       - Paragraph 1: Core professional identity, current leadership/role, and primary industry impact.
+       - Paragraph 2: Notable achievements, digital footprint, and professional affiliations found across the web.
+    4. **VISUAL CLARITY**: Use **bolding** for names, key companies, and significant technologies.
+    5. **CLEAN OUTPUT**: Do not include any meta-tags, introductory phrases like "Here is the summary", or conversational filler.`;
 
     // --- Try Ollama first (local, free, unlimited) ---
     try {
         const ollamaResult = await ollamaGenerateText(prompt, SUMMARY_SYSTEM_PROMPT, {
             temperature: 0.5,
-            timeoutMs: 25000
+            timeoutMs: 30000 // Increased to 30s for cold starts/high load
         });
         if (ollamaResult) {
             console.log("[AI] Summary generated via Ollama (local)");

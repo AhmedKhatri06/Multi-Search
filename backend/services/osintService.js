@@ -43,14 +43,27 @@ export async function searchPublicSignals(name, company, domain) {
         sanitizedQueries.map((q, idx) => {
             const requestId = Math.random().toString(36).slice(-4);
             const label = `[Serper] Simple Request: ${requestId} [${idx}]`;
-            console.time(label);
             
             // AGGRESSIVE: Cap each dork at 20s to prevent hanging
             const timeout = new Promise((_, reject) => 
                 setTimeout(() => reject(new Error("Serper timeout (20s)")), 20000)
             );
+
+            const executeFetch = async (retryCount = 0) => {
+                try {
+                    return await performSearch(q, true);
+                } catch (err) {
+                    const isNetworkError = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message.includes('hang up');
+                    if (retryCount < 1 && isNetworkError) {
+                        console.warn(`[Serper] OSINT Retry (${retryCount + 1}) for: ${q.slice(0, 30)}...`);
+                        return executeFetch(retryCount + 1);
+                    }
+                    throw err;
+                }
+            };
             
-            return Promise.race([performSearch(q, true), timeout])
+            console.time(label);
+            return Promise.race([executeFetch(), timeout])
                 .then(r => {
                     console.timeEnd(label);
                     return r;
@@ -68,7 +81,8 @@ export async function searchPublicSignals(name, company, domain) {
     const phones = [];
 
     flattened.forEach(res => {
-        const text = `${res.title || ''} ${res.snippet || ''}`;
+        if (!res) return; // MODULE 1: Stability check for undefined results
+        const text = `${res.title || ''} ${res.snippet || ''} ${res.text || ''}`;
         const extractedEmails = extractEmails(text);
         const extractedPhones = extractPhones(text);
         emails.push(...extractedEmails);

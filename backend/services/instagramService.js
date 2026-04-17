@@ -128,8 +128,12 @@ class InstagramService {
       const response = await axios.post(url, signedBody, {
         headers: {
           'Cookie': `sessionid=${sessionId}`,
-          'User-Agent': 'Instagram 10.1.0 Android (18/4.3; 320dpi; 720x1280; Xiaomi; HM 1SW; armani; en_US)',
-          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'
+          'User-Agent': 'Instagram 260.0.0.22.115 Android (31/12; 480dpi; 1080x2280; OnePlus; GM1913; OnePlus7Pro; qcom; en_US; 341643444)',
+          'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+          'X-IG-App-ID': '936619743392459', // Modern App ID
+          'X-IG-Capabilities': '3brTvx0=',
+          'X-IG-Connection-Type': 'WIFI',
+          'Accept-Language': 'en-US'
         }
       });
 

@@ -16,15 +16,22 @@ const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'llama3';
 const OLLAMA_ENABLED = process.env.OLLAMA_ENABLED !== 'false';
 
 let ollamaAvailable = null; // null = unchecked, true/false after check
+let lastCheckTime = 0;
 
 /**
  * Test if Ollama is reachable.
  * @returns {Promise<boolean>}
  */
 async function checkOllamaHealth() {
+    // MODULE 2: Fast-check cache (prevent repetitive hangs)
+    const now = Date.now();
+    if (ollamaAvailable === false && (now - lastCheckTime) < 30000) {
+        return false; // Skip checking for 30s if it's confirmed down
+    }
+
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 3000);
+        const timeout = setTimeout(() => controller.abort(), 2000); // Increased to 2s
 
         const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`, {
             signal: controller.signal
@@ -51,6 +58,8 @@ async function checkOllamaHealth() {
         return false;
     } catch (e) {
         console.warn(`[LocalSummary] Ollama not reachable at ${OLLAMA_BASE_URL}: ${e.message}`);
+        ollamaAvailable = false;
+        lastCheckTime = Date.now();
         return false;
     }
 }
@@ -74,11 +83,12 @@ export async function ollamaGenerateText(prompt, systemPrompt = '', options = {}
 
     if (!ollamaAvailable) return null;
 
-    const { temperature = 0.5, timeoutMs = 30000 } = options;
+    options = { timeoutMs: 60000, ...options }; // Default to 60s
+    const { temperature = 0.5 } = options;
 
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        const timeout = setTimeout(() => controller.abort(), options.timeoutMs);
 
         const messages = [];
         if (systemPrompt) {
