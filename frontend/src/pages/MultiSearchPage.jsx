@@ -49,14 +49,37 @@ const getPlatformEmoji = (platform) => {
     return '🔗';
 };
 
-const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, personaName }) => {
-    const loadingMessages = [
+const LoadingChecklist = ({ stage, STAGES, progress, currentStep, onCancel, query, personaName }) => {
+    let title = "Processing Intelligence...";
+    let loadingMessages = [
         "Initializing scan",
         "Searching records",
         "Analyzing signals",
         "Extracting deep intelligence",
         "Generating report"
     ];
+
+    if (stage === STAGES.IDENTIFYING) {
+        title = "Discovering Identities...";
+    } else if (stage === STAGES.REFINING) {
+        title = "Refining Selection...";
+        loadingMessages = [
+            "Analyzing choice",
+            "Pivoting search",
+            "Refining metadata",
+            "Improving matches",
+            "Updating results"
+        ];
+    } else if (stage === STAGES.DEEP_LOADING) {
+        title = "Acquiring Deep Intel...";
+        loadingMessages = [
+            "Handshaking socials",
+            "Querying archives",
+            "Dorking documents",
+            "Aggregating data",
+            "Finalizing dossier"
+        ];
+    }
 
     const clampedProgress = Math.min(Math.floor(progress), 100);
 
@@ -73,6 +96,11 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
             </button>
 
             <div className="floating-intelligence-pill">
+                {/* Header with Stage Info */}
+                <div className="pill-header">
+                    <span className="pill-badge">{title}</span>
+                </div>
+
                 {/* Scan Ring + Orb */}
                 <div className="scan-ring-container">
                     <svg className="scan-ring-svg" viewBox="0 0 120 120">
@@ -106,7 +134,7 @@ const LoadingChecklist = ({ title, progress, currentStep, onCancel, query, perso
                     <div className="pill-meta-row">
                         <div className="pill-status-message">
                             <span className="status-dot"></span>
-                            <span className="status-text">{loadingMessages[currentStep]}</span>
+                            <span className="status-text">{loadingMessages[currentStep] || "Processing..."}</span>
                         </div>
                         <div className="pill-percentage-bubble">
                             {clampedProgress}%
@@ -134,6 +162,9 @@ const MultiSearchPage = () => {
         ENTRY: "ENTRY",
         IDENTIFYING: "IDENTIFYING",
         SELECTING: "SELECTING",
+        REFINING: "REFINING",
+        CONFIRMING: "CONFIRMING",
+        ENRICHING: "ENRICHING",
         DEEP_LOADING: "DEEP_LOADING",
         DASHBOARD: "DASHBOARD"
     };
@@ -313,13 +344,10 @@ const MultiSearchPage = () => {
     // Unified Progress & Step Logic
     useEffect(() => {
         let interval;
-        if (stage === STAGES.IDENTIFYING || stage === STAGES.DEEP_LOADING) {
+        if (stage === STAGES.IDENTIFYING || stage === STAGES.REFINING || stage === STAGES.DEEP_LOADING) {
             interval = setInterval(() => {
                 setLoadProgress(prev => {
-                    // Asymptotic Trickle Logic:
-                    // Never hits a hard ceiling. As it approaches the target (48 or 98), 
-                    // the increment gets smaller and smaller, showing the app is still active.
-                    const target = stage === STAGES.IDENTIFYING ? 48.5 : 99.2;
+                    const target = stage === STAGES.IDENTIFYING ? 48.5 : (stage === STAGES.REFINING ? 78.5 : 99.2);
                     if (prev < target) {
                         const remaining = target - prev;
                         // Move 5% of the remaining distance or at least a tiny random amount
@@ -422,101 +450,15 @@ const MultiSearchPage = () => {
 
 
 
-    const groupCandidates = (data) => {
-        // Sort: Local results first, then by name length descending
-        const sortedData = [...data].sort((a, b) => {
-            if (a.source === "local" && b.source !== "local") return -1;
-            if (a.source !== "local" && b.source === "local") return 1;
-            return (b.name || "").length - (a.name || "").length;
-        });
-
-        const groups = [];
-
-        sortedData.forEach(item => {
-            const name = (item.name || "").toLowerCase().trim();
-            if (!name) return;
-
-            let matchedGroup = groups.find(group => {
-                const groupName = group.name.toLowerCase().trim();
-                const itemSource = item.source || "Unknown";
-                const groupSource = group.source || "Unknown";
-
-                // 1. Same source + Same name = Likely same record
-                if (itemSource === groupSource && groupName === name) return true;
-
-                // 2. Cross-source matching via identifiers (Stronger Anchor)
-                const itemPhones = (item.phoneNumbers || (item.phone ? [item.phone] : [])).filter(p => !isPlaceholder(p));
-                const groupPhones = (group.phoneNumbers || []).filter(p => !isPlaceholder(p));
-                const itemEmails = (item.email ? [item.email.toLowerCase()] : (item.emails || [])).filter(e => !isPlaceholder(e));
-                const groupEmails = (group.emails || []).filter(e => !isPlaceholder(e));
-
-                if (itemPhones.length > 0 && itemPhones.some(p => groupPhones.includes(p))) return true;
-                if (itemEmails.length > 0 && itemEmails.some(e => groupEmails.includes(e.toLowerCase()))) return true;
-
-                // 3. SELECTION DIVERSITY: If they don't share high-entropy identifiers (like a real email) 
-                // and they come from different sources (Internet vs Local), do NOT merge them based on name alone.
-                return false;
-            });
-
-            if (matchedGroup) {
-                // Merge unique identifiers (CRITICAL for Deep Search accuracy)
-                if (item.phoneNumbers) {
-                    item.phoneNumbers.forEach(p => {
-                        if (!matchedGroup.phoneNumbers.includes(p)) matchedGroup.phoneNumbers.push(p);
-                    });
-                }
-                if (item.emails) {
-                    item.emails.forEach(e => {
-                        if (!matchedGroup.emails.includes(e)) matchedGroup.emails.push(e);
-                    });
-                }
-                if (item.email && !matchedGroup.emails.includes(item.email)) {
-                    matchedGroup.emails.push(item.email);
-                }
-
-                // Merge unique descriptions into a single standard string
-                if (item.description && item.description !== 'No description available') {
-                    // Standardize: remove redundant "SBMP" or other AI suffixes from sub-descriptions
-                    const cleanDesc = item.description.split(' - ')[0].trim();
-                    if (!matchedGroup.descriptions.includes(cleanDesc)) {
-                        matchedGroup.descriptions.push(cleanDesc);
-                    }
-                }
-
-                // Construct a single primary description
-                matchedGroup.richDescription = matchedGroup.descriptions.slice(0, 2).join(" | ");
-
-                // Merge unique sources
-                const itemSource = item.source || "Unknown";
-                if (!matchedGroup.sources.includes(itemSource)) {
-                    matchedGroup.sources.push(itemSource);
-                }
-
-                // Keep the "Verified" local record's ID/metadata as primary
-                if (item.source === "local") {
-                    matchedGroup.id = item.id || matchedGroup.id;
-                    matchedGroup.source = "local";
-                    matchedGroup.metadata = item.metadata || matchedGroup.metadata;
-                }
-            } else {
-                let sourceLabel = item.source || "Unknown";
-                if (sourceLabel.toLowerCase() === 'local') sourceLabel = 'CSV Archive';
-                if (sourceLabel.toLowerCase() === 'sqlite') sourceLabel = 'Identity SQL';
-                if (sourceLabel.toLowerCase() === 'mongodb') sourceLabel = 'Cluster DB';
-
-                const descriptions = (item.description && item.description !== 'No description available') ? [item.description] : [];
-
-                groups.push({
-                    ...item,
-                    phoneNumbers: item.phoneNumbers || (item.phone ? [item.phone] : []),
-                    emails: item.email ? [item.email.toLowerCase()] : (item.emails || []),
-                    descriptions: descriptions,
-                    richDescription: descriptions.slice(0, 2).join(" | "),
-                    sources: [sourceLabel]
-                });
-            }
-        });
-        return groups;
+    const groupCandidates = (list) => {
+        if (!list || !Array.isArray(list)) return [];
+        return list.map((item, index) => ({
+            id: `cand-${index}-${Date.now()}`,
+            name: item.title || item.name || "Unknown Identity",
+            description: item.subtitle || item.description || "No description available",
+            source: item.source || "Internet",
+            url: item.url || ""
+        }));
     };
 
     const cancelSearch = () => {
@@ -527,113 +469,57 @@ const MultiSearchPage = () => {
     };
 
     const handleIdentify = async (precisionData = null, isRefinement = false) => {
-        // Cancel any pending search first
         cancelSearch();
         abortControllerRef.current = new AbortController();
 
-        // Ensure precisionData is actually a data object, not a React Event
-        const isData = precisionData && typeof precisionData === 'object' && !precisionData.nativeEvent;
-        const searchData = isData ? precisionData : null;
+        let searchName = precisionData ? precisionData.name : query;
+        const searchKeyword = precisionData ? precisionData.keyword : "";
+        const searchNumber = precisionData ? precisionData.number : "";
 
-        const searchName = searchData ? searchData.name : query;
-        if (!searchName || typeof searchName !== 'string' || !searchName.trim()) return;
-
-        // B-003: Reset stale metadata & UI states instantly before starting
-        setData(null);
-        setCandidates([]);
-        setShowFeedbackForm(false); // CRITICAL: Stop the "Person Not Found" loop immediately
-        setLoadProgress(10); 
-
-        setStage(STAGES.IDENTIFYING);
-
-        // F-002: Normalize search query
-        let finalSearchName = searchName;
-        if (searchMode === SEARCH_MODES.PHONE) {
-            const cleanNumber = searchName.replace(/\+/g, "").replace(/\D/g, "");
-            // If it doesn't start with +, prepend the selected prefix
-            if (!searchName.startsWith("+")) {
-                finalSearchName = `${selectedCountry.prefix}${cleanNumber}`;
-            }
+        // If it's a phone search from the modal, prioritize the number
+        if (searchMode === SEARCH_MODES.PHONE && searchNumber) {
+            searchName = searchNumber;
         }
 
-        // id: 12 - Sync global query so progress bar shows the LATEST name/number
-        // F-003: Format display name as "Name keyword" if keyword exists
-        const displayName = precisionData?.keyword 
-            ? `${finalSearchName} ${precisionData.keyword}` 
-            : finalSearchName;
-            
-        setQuery(displayName);
-        const finalQuery = finalSearchName;
+        if (!searchName || !searchName.trim()) return;
+
+        setCandidates([]);
+        setShowFeedbackForm(false);
+        setLoadProgress(10); 
+        setStage(STAGES.IDENTIFYING);
+        setQuery(searchName);
 
         const VITE_API_URL = API_URL || "http://localhost:5000";
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s fail-safe
 
         try {
             const res = await fetch(`${VITE_API_URL}/api/multi-search/identify`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    name: finalQuery,
-                    keywords: precisionData?.keyword || "",
+                    name: searchName,
+                    keywords: searchKeyword,
                     location: precisionData?.location || "",
-                    number: precisionData?.number || "",
-                    isRefinement: !!isRefinement
+                    searchMode: searchMode // Pass mode for backend disambiguation
                 }),
                 signal: abortControllerRef.current?.signal
             });
-            clearTimeout(timeoutId);
 
-            // B-002: If it's a phone search, try to find the name early for the progress bar
-            if (searchMode === SEARCH_MODES.PHONE) {
-                // We'll set a temporary "Resolving..." but if the API returns directResolve, it will update
-                setData({ personaName: "Resolving identity..." });
-            }
-
-            if (!res.ok) throw new Error(`API failed with status ${res.status}`);
+            if (!res.ok) throw new Error("Identify failed");
 
             const result = await res.json();
 
-            if (result.directResolve && result.resolvedPersona) {
-                console.log("[Search] Direct Resolve Triggered:", result.personaName);
-                // Immediately proceed to Deep Search with the resolved persona
-                setData({ personaName: result.personaName }); // Store for progress bar
-                handleCandidateSelect(result.resolvedPersona);
-            } else if (result.candidates && result.candidates.length > 0) {
+            if (result.candidates && result.candidates.length > 0) {
                 const grouped = groupCandidates(result.candidates);
                 setCandidates(grouped);
-                setLoadProgress(50); // Jump to 50% when candidates are found
+                setLoadProgress(50);
                 setStage(STAGES.SELECTING);
             } else {
-                if (isRefinement) {
-                    console.log("[Search] Refined search returned no results. Ending flow.");
-                    alert("Even with specialized attributes, no matching identity could be verified across current internet and local sources. Please try different keywords or a broader location.");
-                    
-                    // B-004: Reset query to the original base name to prevent keyword pollution
-                    if (precisionData?.name) {
-                        setQuery(precisionData.name);
-                    }
-                    
-                    setLoadProgress(0);
-                    // FIXED: Stay in SELECTING stage so the user can see the 'Person Not Found' option
-                    // instead of being forced back to the home page (which creates the loop).
-                    setStage(STAGES.SELECTING);
-                    setCandidates([]); // Ensure it shows the "No Potential Matches" view
-                } else {
-                    console.log("[Search] No candidates found. Triggering Precision Search.");
-                    setStage(STAGES.ENTRY);
-                    setShowFeedbackForm(true);
-                }
+                console.log("[Search] No candidates found.");
+                setStage(STAGES.ENTRY);
+                setShowFeedbackForm(true);
             }
         } catch (err) {
-            clearTimeout(timeoutId);
-            if (err.name === 'AbortError') {
-                console.error("Identification timed out after 60s");
-                alert("The initial identification is taking longer than expected. Please try again with more specific keywords.");
-            } else {
-                console.error("Identification failed:", err);
-                alert("Search service is currently unreachable. If you are using the deployed version, please ensure the backend is active and the API URL is configured correctly.");
-            }
+            console.error("Identification failed:", err);
             setLoadProgress(0);
             setStage(STAGES.ENTRY);
         }
@@ -641,89 +527,49 @@ const MultiSearchPage = () => {
 
     const handleCandidateSelect = async (candidate) => {
         setStage(STAGES.DEEP_LOADING);
-        setLoadProgress(60); // Start deep search at 60%
-        setData(prev => ({ ...prev, personaName: candidate.name })); // Ensure name shows in loader
+        setLoadProgress(60);
+        setData(prev => ({ ...prev, personaName: candidate.name }));
+
         const VITE_API_URL = API_URL || "http://localhost:5000";
-        
-        // SYNC: Create a new controller and tie it to the ref for cancellation support
-        if (abortControllerRef.current) abortControllerRef.current.abort();
-        const controller = new AbortController();
-        abortControllerRef.current = controller;
-        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s fail-safe for deep OSINT
 
         try {
-            const res = await fetch(`${VITE_API_URL}/api/multi-search/deep`, {
+            const res = await fetch(`${VITE_API_URL}/api/multi-search/enrichment`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ person: candidate }),
-                signal: abortControllerRef.current.signal
+                signal: abortControllerRef.current?.signal
             });
-            clearTimeout(timeoutId);
 
-            if (!res.ok) throw new Error(`Deep Search failed with status ${res.status}`);
+            if (!res.ok) throw new Error("Enrichment failed");
 
             const result = await res.json();
+            
+            // Map the result to match the dashboard structure
+            const enrichedData = {
+                person: {
+                    ...result.confirmedIdentity,
+                    name: result.confirmedIdentity.name,
+                    description: result.confirmedIdentity.description,
+                    emails: result.emails || [],
+                    phoneNumbers: result.phoneNumbers || [],
+                    aiSummary: result.aiSummary || "Analysis complete. Dossier finalized."
+                },
+                socials: result.profiles || [],
+                documents: result.documents || [],
+                externalDocuments: result.documents || [], // Map for compatibility
+                images: (result.images || []).map(img => ({
+                    original: img,
+                    thumbnail: img,
+                    title: "Evidence Discovery"
+                }))
+            };
 
-            // Validate response 
-            if (!result || !result.person || !result.person.name) {
-                console.warn("[Deep Search] Malformed response:", result);
-                setDeepData({ _error: true, person: { name: candidate.name || 'Unknown' }, socials: [], images: [], localData: [] });
-                setLoadProgress(100);
-                setStage(STAGES.DASHBOARD);
-                return;
-            }
-
-            // PERMANENT STABILITY FIX: Transition to Dashboard immediately once Layer 1 is ready
-            setDeepData(result);
-            setLoadProgress(95);
-            setStage(STAGES.DASHBOARD);
+            setDeepData(enrichedData);
             setLoadProgress(100);
-
-            // PERMANENT STABILITY FIX: Layer 2 Verification (Background)
-            // We don't await this so the dashboard renders immediately
-            fetch(`${VITE_API_URL}/api/multi-search/verify`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ 
-                    person: result.person, 
-                    socials: result.socials, 
-                    allSearchItems: result.allSearchItems 
-                }),
-                signal: abortControllerRef.current?.signal
-            })
-            .then(res => res.json())
-            .then(verifyData => {
-                if (verifyData && verifyData.images) {
-                    setDeepData(prev => ({
-                        ...prev,
-                        images: verifyData.images, // Update with verified gallery
-                        person: {
-                            ...prev.person,
-                            aiSummary: verifyData.aiSummary, // Update with high-quality AI summary
-                            primaryImage: verifyData.primaryImage || prev.person.primaryImage
-                            // Note: Contact info (emails/phones) is now consolidated in /deep (Layer 1)
-                        }
-                    }));
-                }
-            })
-            .catch(err => {
-                console.warn("[Deep Search] Layer 2 Verification aborted/failed:", err.message);
-            });
-
-            const updated = [candidate.name, ...recent.filter(r => r !== candidate.name)].slice(0, 5);
-            setRecent(updated);
-            localStorage.setItem("recent-searches", JSON.stringify(updated));
+            setStage(STAGES.DASHBOARD);
         } catch (err) {
-            clearTimeout(timeoutId);
-            if (err.name === 'AbortError') {
-                console.error("Deep search timed out after 90s");
-                alert("Deep intelligence gathering is taking longer than expected (90s). Please try again or refine your search.");
-            } else {
-                console.error("Deep Search failed:", err);
-                alert("Failed to retrieve deep search details. Please check your connection.");
-            }
-            setLoadProgress(0);
-            setStage(STAGES.SELECTING); // Stay on selection instead of limbo
+            console.error("Enrichment failed:", err);
+            setStage(STAGES.SELECTING);
         }
     };
 
@@ -761,6 +607,7 @@ const MultiSearchPage = () => {
     };
 
     const handleCancel = () => {
+        cancelSearch();
         handleReset();
     };
 
@@ -930,7 +777,8 @@ const MultiSearchPage = () => {
             {/* Global Loading Overlay */}
             {(stage === STAGES.IDENTIFYING || stage === STAGES.DEEP_LOADING) && (
                 <LoadingChecklist
-                    title={stage === STAGES.IDENTIFYING ? "Initial identification..." : "Deep intelligence dive..."}
+                    stage={stage}
+                    STAGES={STAGES}
                     progress={loadProgress}
                     currentStep={currentStep}
                     onCancel={handleCancel}
@@ -1093,79 +941,61 @@ const MultiSearchPage = () => {
                 )}
 
                 {/* 2. Selecting View (Structured Candidates) */}
-                {stage === STAGES.SELECTING && (
+                {(stage === STAGES.SELECTING) && (
                     <div className="selecting-view animate-fade-up">
-                        <div style={{ marginBottom: '2rem' }}>
-                            <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>Potential intel matches</h2>
+                        <div style={{ marginBottom: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div>
+                                <h2 style={{ margin: 0, fontSize: '1.5rem', fontWeight: 800 }}>
+                                    Potential Intel Matches
+                                </h2>
+                                <p style={{ color: 'var(--text-soft)', margin: '0.5rem 0 0' }}>
+                                    Select the correct identity to trigger deep intelligence acquisition.
+                                </p>
+                            </div>
                         </div>
+
                         <div className="candidates-grid">
                             {candidates.map((person, idx) => (
-                                <div key={idx} ref={el => { cardRefs.current[idx] = el; }} className={`saas-card animate-scale-in ${expandedCards.has(idx) ? 'expanded' : ''}`} onClick={() => handleCandidateSelect(person)} style={{ cursor: 'pointer' }}>
+                                <div 
+                                    key={person.id} 
+                                    className="saas-card animate-scale-in" 
+                                    style={{ cursor: 'pointer', border: stage === STAGES.CONFIRMING ? '2px solid var(--accent)' : '1px solid var(--border-light)' }}
+                                >
                                     <div className="card-icon" style={{ marginTop: '0.25rem' }}>👤</div>
                                     <div className="card-body">
                                         <div className="card-meta">
-                                            {person.confidence === 'high' ? 'High Accuracy' : 'Identity Probable'}
-                                            {person.source === 'local' && <span className="verified-badge">✓ Verified</span>}
+                                            {person.source === 'local' ? 'Verified Archive' : `Source: ${person.source}`}
                                         </div>
-                                        <h3 className="card-title">{(person.name || "").split(' - ')[0]}</h3>
-
-                                        <p className="card-desc">
-                                            {person.richDescription || person.description || "Intelligence Synthesis Target"}
+                                        <h3 className="card-title">{person.name}</h3>
+                                        <p className="card-desc" style={{ fontSize: '0.9rem', color: 'var(--text-main)', opacity: 0.9 }}>
+                                            {person.description}
                                         </p>
-
-                                        <div style={{ marginTop: '0.75rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                            {person.phoneNumbers && person.phoneNumbers.length > 0 && (
-                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                                    <div style={{ fontSize: '0.85rem', color: 'var(--primary)', fontWeight: 600 }}>
-                                                        📞 {revealedNumbers.has(person.phoneNumbers[0]) ? person.phoneNumbers[0] : maskPhone(person.phoneNumbers[0])}
-                                                    </div>
-                                                    <button
-                                                        className="reveal-btn-sm"
-                                                        onClick={(e) => { e.stopPropagation(); toggleReveal(person.phoneNumbers[0]); }}
-                                                    >
-                                                        {revealedNumbers.has(person.phoneNumbers[0]) ? "Hide" : "Show"}
-                                                    </button>
-                                                </div>
-                                            )}
-                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                                                {person.sources && person.sources.map((src, i) => (
-                                                    <span key={i} className="card-desc" style={{ fontSize: '0.7rem', background: 'var(--bg-subtle)', padding: '2px 8px', borderRadius: '12px', opacity: 1, color: 'var(--accent)', fontWeight: 600 }}>
-                                                        📍 {src}
-                                                    </span>
-                                                ))}
-                                                {!person.sources && person.location && <p className="card-desc" style={{ fontSize: '0.8rem', opacity: 0.8 }}>📍 {person.location}</p>}
-                                            </div>
-                                        </div>
-
-                                        {overflowingCards.has(idx) && (
-                                            <span
-                                                className="card-read-more-text"
-                                                onClick={(e) => {
-                                                    e.stopPropagation();
-                                                    setExpandedCards(prev => {
-                                                        const next = new Set(prev);
-                                                        if (next.has(idx)) next.delete(idx);
-                                                        else next.add(idx);
-                                                        return next;
-                                                    });
-                                                }}
+                                        
+                                        <div className="card-actions-row" style={{ marginTop: '1.25rem' }}>
+                                            <button 
+                                                className="nav-btn primary" 
+                                                style={{ padding: '0.5rem 1rem', fontSize: '0.8rem', width: '100%', background: 'var(--accent)' }}
+                                                onClick={() => handleCandidateSelect(person)}
                                             >
-                                                {expandedCards.has(idx) ? 'Show less' : 'Read more'}
-                                            </span>
-                                        )}
+                                                Select and Initialize Deep Search
+                                            </button>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
                         </div>
-                        <div className="animate-fade-up" style={{ marginTop: '3rem', textAlign: 'center' }}>
-                            <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Don't see who you're looking for?</p>
-                            <button className="nav-btn secondary" onClick={() => {
-                                setFeedbackData({ name: query, keyword: '', number: '' });
-                                setShowFeedbackForm(true);
-                            }} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
-                                Person Not Found
-                            </button>
-                        </div>
+
+                        {stage === STAGES.SELECTING && (
+                            <div className="animate-fade-up" style={{ marginTop: '3rem', textAlign: 'center' }}>
+                                <p style={{ color: 'var(--text-muted)', marginBottom: '1rem' }}>Don't see who you're looking for?</p>
+                                <button className="nav-btn secondary" onClick={() => {
+                                    setFeedbackData({ name: query, keyword: '', number: '' });
+                                    setShowFeedbackForm(true);
+                                }} style={{ border: '1px solid var(--accent)', color: 'var(--accent)' }}>
+                                    Person Not Found
+                                </button>
+                            </div>
+                        )}
                     </div>
                 )}
 
@@ -1484,44 +1314,78 @@ const MultiSearchPage = () => {
 
             {showFeedbackForm && (
                 <div className="modal-overlay" onClick={() => setShowFeedbackForm(false)}>
-                    <form className="precision-modal" onSubmit={handleFeedbackSubmit} onClick={e => e.stopPropagation()}>
+                    <form className="precision-modal animate-scale-in" onSubmit={handleFeedbackSubmit} onClick={e => e.stopPropagation()}>
                         <div className="modal-header">
-                            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.25rem' }}>Precision Search</h2>
-                            <p style={{ color: 'var(--text-soft)', margin: 0, fontSize: '0.9rem' }}>Provide additional attributes to improve target identification.</p>
+                            <h2 style={{ fontSize: '1.5rem', fontWeight: 800, marginBottom: '0.25rem' }}>Intelligence Fallback</h2>
+                            <p style={{ color: 'var(--text-soft)', margin: 0, fontSize: '0.9rem' }}>Initial discovery failed. Please provide exact attributes.</p>
+                        </div>
+
+                        <div className="modal-tabs" style={{ display: 'flex', gap: '1rem', padding: '0 1.5rem', marginBottom: '1.5rem', borderBottom: '1px solid var(--border-light)' }}>
+                            <button 
+                                type="button"
+                                className={`tab-btn ${searchMode === SEARCH_MODES.GENERAL ? 'active' : ''}`}
+                                onClick={() => setSearchMode(SEARCH_MODES.GENERAL)}
+                                style={{ padding: '0.75rem 0', background: 'none', border: 'none', color: searchMode === SEARCH_MODES.GENERAL ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 700, borderBottom: searchMode === SEARCH_MODES.GENERAL ? '2px solid var(--accent)' : 'none', cursor: 'pointer' }}
+                            >
+                                Name Search
+                            </button>
+                            <button 
+                                type="button"
+                                className={`tab-btn ${searchMode === SEARCH_MODES.PHONE ? 'active' : ''}`}
+                                onClick={() => setSearchMode(SEARCH_MODES.PHONE)}
+                                style={{ padding: '0.75rem 0', background: 'none', border: 'none', color: searchMode === SEARCH_MODES.PHONE ? 'var(--accent)' : 'var(--text-muted)', fontWeight: 700, borderBottom: searchMode === SEARCH_MODES.PHONE ? '2px solid var(--accent)' : 'none', cursor: 'pointer' }}
+                            >
+                                Number Search
+                            </button>
                         </div>
 
                         <div className="modal-body">
-                            <div className="form-dense-group">
-                                <div className="form-group">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NAME</label>
-                                    <input
-                                        className="hero-search-input"
-                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
-                                        value={feedbackData.name}
-                                        onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
-                                        autoFocus
-                                        required
-                                        maxLength={30}
-                                    />
+                            {searchMode === SEARCH_MODES.GENERAL ? (
+                                <div className="form-dense-group animate-fade-up">
+                                    <div className="form-group">
+                                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>NAME (REQUIRED)</label>
+                                        <input
+                                            className="hero-search-input"
+                                            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                            value={feedbackData.name}
+                                            onChange={(e) => setFeedbackData({ ...feedbackData, name: e.target.value })}
+                                            placeholder="Full legal name"
+                                            required
+                                        />
+                                    </div>
+                                    <div className="form-group">
+                                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>KEYWORD (REQUIRED)</label>
+                                        <input
+                                            className="hero-search-input"
+                                            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                            value={feedbackData.keyword}
+                                            onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
+                                            placeholder="Company, Role, or Location"
+                                            required
+                                        />
+                                    </div>
                                 </div>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>KEYWORD</label>
-                                    <input
-                                        className="hero-search-input"
-                                        style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
-                                        value={feedbackData.keyword}
-                                        onChange={(e) => setFeedbackData({ ...feedbackData, keyword: e.target.value })}
-                                        placeholder="e.g. Student at MIT"
-                                    />
+                            ) : (
+                                <div className="form-dense-group animate-fade-up">
+                                    <div className="form-group">
+                                        <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--text-soft)' }}>PHONE NUMBER</label>
+                                        <input
+                                            className="hero-search-input"
+                                            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border-light)', padding: '0.75rem 1rem', fontSize: '1rem', width: '100%', boxSizing: 'border-box', color: 'var(--primary)' }}
+                                            value={feedbackData.number}
+                                            onChange={(e) => setFeedbackData({ ...feedbackData, number: e.target.value })}
+                                            placeholder="e.g. +1 234 567 8900"
+                                            required
+                                        />
+                                    </div>
                                 </div>
-
-                            </div>
+                            )}
                         </div>
 
                         <div className="modal-footer">
-                            <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel Search</button>
-                            <button type="submit" className="nav-btn primary" disabled={savingFeedback}>
-                                {savingFeedback ? "Searching..." : "Search Person"}
+                            <button type="button" className="nav-btn secondary" onClick={() => setShowFeedbackForm(false)}>Cancel</button>
+                            <button type="submit" className="nav-btn primary">
+                                Start Intelligent Discovery
                             </button>
                         </div>
                     </form>

@@ -23,14 +23,7 @@ const port = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-// MongoDB connection
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.error("MongoDB Error:", err));
-
-// Start initialization of in-memory caching
-initCSVService().catch(err => console.error("CSV Init Error:", err));
-
+// Routes
 app.use("/api/lookup", lookUpRoute);
 app.use("/api/multi-search", lookUpRoute); // Backward compatibility
 app.use("/api/nexa-search", nexaSearchRoute);
@@ -44,6 +37,24 @@ app.get("/", (req, res) => {
   res.send("Backend is running 🚀");
 });
 
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
-});
+// MongoDB connection
+mongoose.connect(process.env.MONGO_URI)
+  .then(async () => {
+    console.log("MongoDB Connected");
+    
+    // Start initialization of in-memory caching
+    try {
+        await initCSVService();
+        console.log("[Setup] CSV Service Ready");
+    } catch (err) {
+        console.error("CSV Init Error:", err);
+    }
+
+    app.listen(port, () => {
+      console.log(`Server running on port ${port}`);
+    });
+  })
+  .catch(err => {
+    console.error("CRITICAL: MongoDB Connection Failed!", err);
+    process.exit(1);
+  });

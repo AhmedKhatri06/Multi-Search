@@ -2,6 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
+import { searchFree } from '../utils/freeSearch.js';
 
 dotenv.config();
 
@@ -50,22 +51,12 @@ class InstagramService {
     } catch (error) {
       console.warn('[IG Service] Primary indexer failed:', error.message);
       
-      // Fallback: Use Serper to find handles directly from Google
+      // Fallback: Use Free Engine to find handles
       try {
-        if (!process.env.SERPER_API_KEY) return [];
-        console.log(`[IG Service] Falling back to Serper for ${name} handle discovery...`);
-        const response = await axios.post("https://google.serper.dev/search", {
-          q: `site:instagram.com "${name}"`,
-          num: 10
-        }, {
-          headers: { 
-            "X-API-KEY": process.env.SERPER_API_KEY, 
-            "Content-Type": "application/json" 
-          },
-          timeout: 5000
-        });
+        console.log(`[IG Service] Falling back to Free Engine for ${name} handle discovery...`);
+        const results = await searchFree(`site:instagram.com "${name}"`);
         
-        const handles = (response.data.organic || [])
+        const handles = (results || [])
           .map(r => r.link || r.url || "")
           .filter(l => l.includes('instagram.com/'))
           .map(l => l.split('instagram.com/')[1].split('/')[0])
@@ -73,7 +64,7 @@ class InstagramService {
           
         return [...new Set(handles)];
       } catch (fallbackError) {
-        console.error('[IG Service] Serper fallback failed:', fallbackError.message);
+        console.error('[IG Service] Free Engine fallback failed:', fallbackError.message);
         return [];
       }
     }

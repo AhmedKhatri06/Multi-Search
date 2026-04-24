@@ -22,59 +22,56 @@ export async function searchPublicSignals(name, company, domain) {
     const cleanDomain = scrubInternalMarkers(domain);
 
     const queries = [
-        `"${cleanName}" ${cleanCompany} email`,
-        `"${cleanName}" ${cleanCompany} contact phone`,
-        `site:github.com "${cleanName}" ${cleanDomain}`,
-        `"${cleanName}" ${cleanDomain} filetype:pdf`,
-        `"${cleanName}" email ${cleanDomain}`,
+        cleanCompany ? `"${cleanName}" ${cleanCompany} email` : `"${cleanName}" email`,
+        cleanCompany ? `"${cleanName}" ${cleanCompany} contact phone` : `"${cleanName}" contact phone`,
+        cleanDomain ? `site:github.com "${cleanName}" ${cleanDomain}` : null,
+        cleanDomain ? `"${cleanName}" ${cleanDomain} filetype:pdf` : null,
+        cleanDomain ? `"${cleanName}" email ${cleanDomain}` : null,
         `"${cleanName}" phone number`
-    ];
+    ].filter(Boolean);
 
-    // SANITIZE: Filter out 'null', 'undefined', or empty strings to prevent Serper 400 errors
+    // SANITIZE: Filter out 'null', 'undefined', or empty strings to prevent search engine penalties
     const sanitizedQueries = queries.filter(q => {
         const lower = q.toLowerCase();
-        // AGGRESSIVE: Catch both "null" and null identifier being cast to string
-        return !lower.includes(' null') && !lower.includes('null ') && !lower.includes('"null"') &&
-               !lower.includes('undefined') && !lower.includes('[object object]') && 
-               !q.includes('""');
+        return !lower.includes('null') && !lower.includes('undefined') && 
+               !lower.includes('[object object]') && !q.includes('""');
     });
 
-    const results = await Promise.all(
-        sanitizedQueries.map((q, idx) => {
-            const requestId = Math.random().toString(36).slice(-4);
-            const label = `[Serper] Simple Request: ${requestId} [${idx}]`;
-            
-            // AGGRESSIVE: Cap each dork at 20s to prevent hanging
-            const timeout = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error("Serper timeout (20s)")), 20000)
-            );
+    const results = [];
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-            const executeFetch = async (retryCount = 0) => {
-                try {
-                    return await performSearch(q, true);
-                } catch (err) {
-                    const isNetworkError = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message.includes('hang up');
-                    if (retryCount < 1 && isNetworkError) {
-                        console.warn(`[Serper] OSINT Retry (${retryCount + 1}) for: ${q.slice(0, 30)}...`);
-                        return executeFetch(retryCount + 1);
-                    }
-                    throw err;
-                }
-            };
-            
-            console.time(label);
-            return Promise.race([executeFetch(), timeout])
-                .then(r => {
-                    console.timeEnd(label);
-                    return r;
-                })
-                .catch((e) => {
-                    console.warn(`[Serper] Dork failed or timed out: ${e.message} [ref:${requestId}]`);
-                    console.timeEnd(label);
-                    return [];
-                });
-        })
-    );
+    // SERIALIZED EXECUTION: We run searches one-by-one to avoid rate-limiting on free engines
+    for (const [idx, q] of sanitizedQueries.entries()) {
+        const requestId = Math.random().toString(36).slice(-4);
+        const label = `[FreeSearch-OSINT] Request: ${requestId} [${idx + 1}/${sanitizedQueries.length}]`;
+        
+        const timeout = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error("Timeout (15s)")), 15000)
+        );
+
+        const executeFetch = async () => {
+            try {
+                return await performSearch(q, true);
+            } catch (err) {
+                console.warn(`[FreeSearch-OSINT] Dork failed [ref:${requestId}]: ${err.message}`);
+                return [];
+            }
+        };
+        
+        console.time(label);
+        try {
+            const r = await Promise.race([executeFetch(), timeout]);
+            results.push(r || []);
+            console.timeEnd(label);
+        } catch (e) {
+            console.warn(`[FreeSearch-OSINT] Dork timed out [ref:${requestId}]`);
+            console.timeEnd(label);
+            results.push([]);
+        }
+        
+        // PACING: Breathing room between dorks
+        if (idx < sanitizedQueries.length - 1) await sleep(800);
+    }
 
     const flattened = results.flat();
     const emails = [];

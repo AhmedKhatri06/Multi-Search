@@ -5,9 +5,12 @@ import FormInfo from "../models/FormInfo.js";
 import Document from "../models/Document.js";
 import { sqliteSearch } from "../db/sqlite.js";
 import SearchCache from "../models/SearchCache.js";
-import { identifyPeople, generateText, verifyIdentityMatch } from "../services/aiService.js";
+import { ollamaCandidateHandler, identifyPeople, generateText, verifyIdentityMatch, geminiCandidateHandler, getResilientText } from "../services/aiService.js";
+import { ollamaGenerateText } from "../services/localSummary.js";
+import { searchFree } from "../utils/freeSearch.js";
 import { extractSocialAccounts, supportedPlatformDomains } from "../services/socialMediaService.js";
 import { parseSocialProfile } from "../services/socialProfileParser.js";
+import enrichmentService from "../services/enrichmentService.js";
 import { detectInputType, normalizePhoneNumber, extractContacts, normalizeName, intelligentSplit, cleanRawQuery } from "../utils/searchHelper.js";
 
 // Helper: Identify synthetic/placeholder data patterns that should NEVER be used for merging or displayed as 'Verified'
@@ -34,6 +37,159 @@ import { maskEmail, maskPhone } from "../utils/privacy.js";
 dotenv.config();
 
 const router = express.Router();
+
+// Helper to check for client disconnection
+const checkAbort = (req, res) => {
+    // Only abort if the connection is truly lost/closed by client
+    if (req.socket?.destroyed || res.writableEnded) {
+        const err = new Error("Request Aborted by Client");
+        err.status = 499;
+        throw err;
+    }
+};
+
+/**
+ * Route 1: Discovery (Identify)
+ * Fetches initial candidates from Tavily Basic + Local DBs.
+ * Filtered via Ollama.
+ */
+router.post("/identify", async (req, res) => {
+    const { name, keywords, location } = req.body;
+    if (!name) return res.status(400).json({ error: "Name is required" });
+
+    console.log(`[Flow] Discovery Phase: ${name}`);
+
+    try {
+        checkAbort(req, res);
+        // Parallel fetch: Tavily Basic + Local Repos
+        const [internetRes, dbResults, csvResults, sqliteResults] = await Promise.all([
+            searchFree(name).catch(() => []),
+            Document.find({ text: { $regex: name, $options: "i" } }).limit(5).lean().catch(() => []),
+            searchCSVs(name, "NAME").catch(() => []),
+            Promise.resolve().then(() => sqliteSearch(name)).catch(() => [])
+        ]);
+
+        checkAbort(req, res);
+
+        const rawResults = [
+            ...internetRes,
+            ...dbResults.map(d => ({ title: name, text: d.text || d.content, source: "MongoDB" })),
+            ...csvResults.map(c => ({ title: c.name, text: c.description || c.location, source: "CSV Archives" })),
+            ...sqliteResults.map(s => ({ title: s.name, text: s.title || s.description, source: "SQLite DB" }))
+        ];
+
+        // Process through Gemini for clean cards (Stable Cloud Alternative)
+        const candidates = await geminiCandidateHandler({ name, searchResults: rawResults });
+
+        res.json({ success: true, candidates });
+    } catch (err) {
+        if (err.status === 499) {
+            console.warn(`[Flow] Discovery Aborted for: ${name}`);
+            return;
+        }
+        console.error("[Route] Identify fail:", err.message);
+        res.status(500).json({ error: "Discovery failed" });
+    }
+});
+
+/**
+ * Route 2: Refinement
+ * Takes selected person, pivots with keyword, and returns improved results.
+ */
+router.post("/refinement-search", async (req, res) => {
+    const { name, description } = req.body;
+    if (!name || !description) return res.status(400).json({ error: "Name and Description required" });
+
+    console.log(`[Flow] Refinement Phase: ${name}`);
+
+    try {
+        // 1. Extract keyword via Resilient AI (Gemini -> Groq)
+        const kwPrompt = `Extract ONE short professional keyword (1-2 words) from this description that helps distinguish this person: "${description}"`;
+        const pivotKeyword = await getResilientText(kwPrompt, "Return ONLY the keyword. No punctuation.");
+        
+        const strictKeyword = (pivotKeyword || "").replace(/Keyword:?/i, "").trim().split('\n')[0];
+        console.log(`[Flow] Pivot Keyword: ${strictKeyword}`);
+
+        // 2. Refined Search (Name + Keyword)
+        const refinedQuery = `"${name}" ${strictKeyword}`;
+        const searchRes = await searchFree(refinedQuery).catch(() => []);
+
+        // 3. Re-process cards (Gemini)
+        const candidates = await geminiCandidateHandler({ name, searchResults: searchRes });
+
+        res.json({ success: true, candidates, pivot: strictKeyword });
+    } catch (err) {
+        if (err.status === 499) {
+            console.warn(`[Flow] Refinement Aborted for: ${name}`);
+            return;
+        }
+        console.error("[Route] Refine fail:", err.message);
+        res.status(500).json({ error: "Refinement failed" });
+    }
+});
+
+/**
+ * Route 3: Deep Enrichment
+ * Final aggregation after person selection.
+ */
+router.post("/enrichment", async (req, res) => {
+    const { person } = req.body; 
+    if (!person) return res.status(400).json({ error: "Person data required" });
+
+    console.log(`[Flow] Enrichment Phase: ${person.name}`);
+
+    try {
+        checkAbort(req, res);
+        // 1. Deep Tavily (Advanced) + Socials
+        const deepQuery = `"${person.name}" ${person.description} official social profiles documents`;
+        const deepRes = await searchFree(deepQuery, "advanced").catch(() => []); 
+
+        checkAbort(req, res);
+
+        // Handle both simple array (scraper) and object (tavily advanced)
+        const deepResults = Array.isArray(deepRes) ? deepRes : (deepRes.results || []);
+        const deepImages = Array.isArray(deepRes) ? [] : (deepRes.images || []);
+
+        // 2. Lead Gen (Snov/Apollo) Sequential Flow
+        const enrichmentResult = await enrichmentService.enrichContact(
+            person.name, 
+            person.description
+        ).catch(() => ({ emails: [], phones: [] }));
+        
+        checkAbort(req, res);
+        // 3. Aggregate Dorks (PDF/CSV)
+        const dorkRes = await searchWithDorks([`"${person.name}" filetype:pdf OR filetype:csv`]).catch(() => []);
+
+        checkAbort(req, res);
+
+        // 4. Generate AI Intelligence Summary
+        const evidenceSnippet = deepResults.slice(0, 5).map(r => r.title).join(', ');
+        const summaryPrompt = `Generate a concise 3-sentence professional dossier summary for ${person.name} (${person.description}). 
+        Context: Discovered ${deepResults.length} profiles including ${evidenceSnippet}. 
+        Verified: ${enrichmentResult.emails?.length || 0} emails, ${enrichmentResult.phones?.length || 0} numbers.
+        Tone: Professional, Intelligence Report.`;
+
+        const aiSummary = await getResilientText(summaryPrompt).catch(() => "Intelligence acquisition successful. Dossier compiled from available digital evidence.");
+
+        res.json({ 
+            success: true, 
+            profiles: deepResults,
+            documents: dorkRes,
+            images: deepImages,
+            confirmedIdentity: person,
+            emails: enrichmentResult.emails || [],
+            phoneNumbers: enrichmentResult.phones || [],
+            aiSummary: aiSummary
+        });
+    } catch (err) {
+        if (err.status === 499) {
+            console.warn(`[Flow] Enrichment Aborted for: ${person.name}`);
+            return;
+        }
+        console.error("[Route] Enrichment fail:", err.message);
+        res.status(500).json({ error: "Enrichment failed" });
+    }
+});
 const LOGIC_VERSION = "v3"; // Bump this when changing rank/merge logic to invalidate stale caches
 
 // Helper to normalize image URLs and handle blocked proxies
@@ -115,7 +271,7 @@ function validateEvidence(item, targetName, context = {}) {
 }
 
 /**
- * Sanitizes search queries to remove special characters that trigger Serper 400 errors.
+ * Sanitizes search queries to remove special characters that trigger engine errors.
  */
 function sanitizeQuery(str = "") {
     if (!str) return "";
@@ -143,13 +299,21 @@ function rankResults(results, query, context = null) {
             let score = 0;
 
             // 1. Name Similarity
-            if (combinedText.includes(q)) score += 10;
-            if (title.startsWith(q)) score += 5;
+            if (combinedText.includes(q)) score += 15;
+            if (title.startsWith(q)) score += 10;
+            
+            // Partial Name Match (Handling variations like "Sachin T." or "Tendulkar Sachin")
+            const qParts = q.split(" ").filter(p => p.length > 2);
+            const matchesAnyPart = qParts.some(part => title.includes(part));
+            const matchesAllParts = qParts.every(part => title.includes(part));
+            
+            if (matchesAllParts) score += 20;
+            else if (matchesAnyPart) score += 10;
 
             // 2. CONTEXTUAL BOOST (The identity differentiator)
             if (keywords.length > 0) {
                 keywords.forEach(kw => {
-                    if (combinedText.includes(kw)) score += 20; // Massive boost for keyword correlation
+                    if (combinedText.includes(kw)) score += 30; // Massive boost for keyword correlation
                 });
             }
             if (location && combinedText.includes(location)) {
@@ -184,7 +348,7 @@ function rankResults(results, query, context = null) {
 }
 
 /**
- * Core search logic combined across MongoDB, SQLite, and SerpAPI.
+ * Core search logic combined across MongoDB, SQLite, and Internet sources.
  * @param {string} query
  * @param {boolean} simpleMode - If true, does a broad Google search without social filters.
  */
@@ -221,7 +385,7 @@ export async function searchWikipedia(query) {
 }
 
 /**
- * Helper: Build safe, short Serper queries to avoid 400 errors.
+ * Helper: Build safe, short queries to avoid search engine rejections.
  * Limits complexity to 3 sites and query length to ~200 chars.
  */
 function buildSafeBuckets(baseQuery, domains, maxSites = 3) {
@@ -252,88 +416,23 @@ function buildSafeBuckets(baseQuery, domains, maxSites = 3) {
 }
 
 /**
- * Helper: Execution wrapper for Serper with automatic 400-retry split.
+ * Helper: Execution wrapper for the search engine with automatic split handling.
  */
-async function performSafeSerperSearch(baseQuery, domains, num, isRefinement = false) {
-    // TIGHTENING: Identify name parts for precise quoting
-    const apiKey = (process.env.SERPER_API_KEY || "").trim();
-    
-    // LOGIC FIX: Separate "Exact Name" from "Fuzzy Keywords"
-    // baseQuery often looks like: "dhruvil jain" cyhex
-    const namePart = (baseQuery.match(/"([^"]+)"/) || [null, baseQuery])[1].trim();
-    const keywordPart = baseQuery.replace(`"${namePart}"`, "").replace(/"/g, "").trim();
-    
-    const siteFilter = domains.length > 1
-        ? `(${domains.map(d => `site:${d.split('/')[0]}`).join(" OR ")})`
-        : `site:${domains[0].split('/')[0]}`;
-        
-    // RECONSTRUCTION: "${Name}" Keyword site:...
-    const q = `"${namePart}" ${keywordPart} ${siteFilter}`.trim();
-    
-    // DIAGNOSTICS: Unique label for concurrency tracing
-    const requestId = Math.random().toString(36).slice(-4);
-    const label = `[Serper] Bucket (${domains.length} sites): ${requestId}`;
-
-    // MODULE 8: Reliable Serper Wrapper with Network Retry (Mitigate 'socket hang up')
-    const executeRequest = async (retryCount = 0) => {
-        try {
-            const response = await axios.post("https://google.serper.dev/search", { q, num }, {
-                headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
-                timeout: 30000
-            });
-            return response;
-        } catch (err) {
-            const isNetworkError = err.code === 'ECONNRESET' || err.code === 'ETIMEDOUT' || err.message.includes('hang up');
-            if (retryCount < 1 && isNetworkError) {
-                console.warn(`[Serper] Network retry (${retryCount + 1}) for: ${q.slice(0, 50)}...`);
-                return executeRequest(retryCount + 1);
-            }
-            throw err;
-        }
-    };
-
-    try {
-        console.time(label);
-        const response = await executeRequest();
-        console.timeEnd(label);
-        return response.data?.organic || [];
-    } catch (err) {
-        console.timeEnd(label);
-        // RETRY LOGIC: If 400 Bad Request (Length/Complexity), split and retry
-        if (err.response?.status === 400) {
-            if (domains.length > 1) {
-                console.warn(`[Serper] Query rejected (400). Splitting bucket of ${domains.length} [ref:${requestId}]...`);
-                const mid = Math.ceil(domains.length / 2);
-                const left = domains.slice(0, mid);
-                const right = domains.slice(mid);
-                
-                const [res1, res2] = await Promise.all([
-                    performSafeSerperSearch(baseQuery, left, num, isRefinement),
-                    performSafeSerperSearch(baseQuery, right, num, isRefinement)
-                ]);
-                return [...res1, ...res2];
-            } else {
-                // EMERGENCY FALLBACK: If a single domain still fails with 400 (rare),
-                // run a broad search for the name only to prevent a complete dashboard failure.
-                console.warn(`[Serper] Emergency Fallback: Single domain bucket failed [ref:${requestId}]. Retrying broad search...`);
-                return performSearch(baseQuery, true, null, true, { skipLocal: true });
-            }
-        }
-        
-        console.error(`[Serper] Search failed: ${err.message} | Query: ${q}`);
-        return [];
-    }
+async function performEngineSearch(baseQuery, domains, num, isRefinement = false) {
+    // MODULE 9: Permanent Zero-Cost Search
+    // We have decommissioned Serper.dev and fully pivoted to the Free Engine
+    console.log(`[FreeSearch] Using Aggregated Engine for: "${baseQuery}"`);
+    return await searchFree(baseQuery);
 }
+
 
 export async function performSearch(query, simpleMode = false, identityContext = null, isRefinement = false, options = {}) {
     const { skipLocal = false } = options;
     let internetQuery = sanitizeQuery(query);
-    const imageQuery = sanitizeQuery(query);
-    const fallbackImageQuery = sanitizeQuery(query);
     const targetName = identityContext?.name || "";
     const normQuery = normalize(query);
 
-    // MODULE 8: Performance / Cost Optimization (Caching)
+    // 1. MODULE 8: Performance / Cost Optimization (Caching)
     const cacheKey = `q:${sanitizeQuery(query).toLowerCase()}|simple:${!!simpleMode}`;
     if (!isRefinement) {
         try {
@@ -347,88 +446,45 @@ export async function performSearch(query, simpleMode = false, identityContext =
         }
     }
 
-    // Extract query parts early for scope availability
+    // 2. Extract query parts early
     const localSearchQuery = query.split("(")[0].replace(/site:\S+/g, "").trim();
     const queryWords = localSearchQuery.split(" ").filter(w => w.length > 1);
 
-    // Improved target name extraction: prefer context from identityContext if available
-    if (identityContext?.name) {
-        // targetName already set at top of function
-    } else {
-        const queryWords = localSearchQuery.split(" ").filter(w => w.length > 1);
-        const nameGuess = queryWords.length >= 2 ? queryWords.slice(0, 2).join(" ") : queryWords[0] || localSearchQuery;
-        // If we didn't have identityContext, we use the guess
-        if (!targetName) {
-            // this part is slightly redundant now but safe
-        }
-    }
-    const context = queryWords.length > 2 ? queryWords.slice(2).join(" ") : "";
-
-    // Local Result fetching (Conditional)
     let mongoResults = [];
     let sqliteResults = [];
 
     if (!skipLocal) {
         try {
-            mongoResults = await Document.find({
-                text: { $regex: localSearchQuery, $options: "i" }
-            }).lean();
+            mongoResults = await Document.find({ text: { $regex: localSearchQuery, $options: "i" } }).lean();
+            sqliteResults = sqliteSearch(localSearchQuery);
+
+            if (mongoResults.length === 0 && queryWords.length >= 2) {
+                const nameGuess = queryWords.slice(0, 2).join(" ");
+                mongoResults = await Document.find({ text: { $regex: nameGuess, $options: "i" } }).lean();
+            }
         } catch (dbErr) {
-            console.warn("[MongoDB] Search failed (check MONGO_URI):", dbErr.message);
-        }
-
-        sqliteResults = sqliteSearch(localSearchQuery);
-
-        // 2. Fallback: Keyword search
-        if (mongoResults.length === 0 && queryWords.length >= 2) {
-            const nameGuess = queryWords.slice(0, 2).join(" ");
-            mongoResults = await Document.find({
-                text: { $regex: nameGuess, $options: "i" }
-            }).lean();
-        }
-
-        // 3. Deeper Fallback
-        if (mongoResults.length === 0 && queryWords.length > 0) {
-            mongoResults = await Document.find({
-                $and: queryWords.slice(0, 3).map(word => ({
-                    text: { $regex: word, $options: "i" }
-                }))
-            }).lean();
+            console.warn("[DB] Local search failed:", dbErr.message);
         }
     }
 
-    internetQuery = sanitizeQuery(query);
-    // MODULE 3: "Person Not Found" Hard Reset
-    // If this is a refinement search, we explicitly IGNORE local shortcuts to ensure a fresh internet search
-    // based on the user's manual correction, rather than potentially incorrect data from previous hits.
-    if (!isRefinement && sqliteResults && sqliteResults.length > 0) {
-        const p = sqliteResults[0];
-        const parts = (p.text || "").split(" - ");
-        const rowName = parts[0]?.trim() || "";
-        // Simplified: Stop using rowTitle (descriptions) in Serper queries to avoid restrictive results and timeouts
-        internetQuery = sanitizeQuery(rowName) || sanitizeQuery(query);
-    }
-
-    // REAL INTERNET SEARCH – SERPAPI
-    // REAL INTERNET SEARCH – SERPAPI (Parallel Adaptive Buckets)
+    // 3. Internet Search Implementation
     let internetResults = [];
     try {
         if (!simpleMode) {
-            // RE-ARCHITECTURE: Dynamic Safe Bucketing
-            const goldDomains = ['linkedin.com/in/', 'en.wikipedia.org', 'twitter.com', 'x.com', 'facebook.com'];
+            const goldDomains = ['linkedin.com', 'en.wikipedia.org', 'twitter.com', 'x.com', 'facebook.com', 'github.com'];
             const otherDomains = supportedPlatformDomains.filter(d => !goldDomains.includes(d) && d !== 'instagram.com');
 
             const goldBuckets = buildSafeBuckets(internetQuery, goldDomains, 3);
-            const otherBuckets = buildSafeBuckets(internetQuery, otherDomains, 3);            // 3. Execute with Batch Pacing (Prevents Burst 400 errors)
+            const otherBuckets = buildSafeBuckets(internetQuery, otherDomains, 3);
             const allBuckets = [...goldBuckets, ...otherBuckets];
+
             const internetRes = await batchWithPacing(allBuckets, async (bucket) => {
                 if (options.signal && options.signal()) return [];
-                return performSafeSerperSearch(internetQuery, bucket, isRefinement ? 25 : 15, isRefinement);
-            }, 3, 400); // 3 buckets at a time with 400ms delay
+                return performEngineSearch(internetQuery, bucket, isRefinement ? 25 : 15, isRefinement);
+            }, 3, 400);
 
-            internetResults = internetRes.flat();
-    const seenLinks = new Set();
-            internetResults = internetResults.filter(item => {
+            const seenLinks = new Set();
+            internetResults = internetRes.flat().filter(item => {
                 const link = item.link || "";
                 if (link && !seenLinks.has(link)) {
                     seenLinks.add(link);
@@ -436,244 +492,87 @@ export async function performSearch(query, simpleMode = false, identityContext =
                 }
                 return false;
             });
-
-            console.log(`[Serper.dev] Parallel Sweep: ${internetResults.length} unique results found.`);
-            internetResults.slice(0, 5).forEach(r => console.log(`[Serper RAW] Title: "${r.title}" | Link: ${r.link}`));
+            console.log(`[FreeSearch] Parallel Sweep: ${internetResults.length} unique results.`);
         } else {
-            // SIMPLE SEARCH: Single broad query
-            const requestId = Math.random().toString(36).slice(-4);
-            const label = `[Serper] Simple Request: ${requestId}`;
-            console.time(label);
-            const response = await axios.post("https://google.serper.dev/search", {
-                q: internetQuery,
-                num: isRefinement ? 30 : 20
-            }, {
-                headers: { "X-API-KEY": (process.env.SERPER_API_KEY || "").trim(), "Content-Type": "application/json" },
-                timeout: 25000
-            });
-            console.timeEnd(label);
-            internetResults = response.data?.organic || [];
-            console.log(`[Serper.dev] Simple Mode: ${internetResults.length} results found.`);
-            internetResults.slice(0, 5).forEach(r => console.log(`[Serper RAW] Title: "${r.title}" | Link: ${r.link}`));
+            console.log(`[Search] Simple Free Engine for: "${internetQuery}"`);
+            internetResults = await searchFree(internetQuery).catch(() => []);
         }
 
-        const results = internetResults;
+        // Processing & Filtering
         const processedInternet = [];
-
-        // MODULE 8: Save to Cache for and follow-up reuse
-        if (results.length > 0) {
-            try {
-                await SearchCache.findOneAndUpdate(
-                    { query: cacheKey },
-                    { results, timestamp: new Date() },
-                    { upsert: true }
-                );
-            } catch (e) {
-                console.warn("[Cache] Save failed:", e.message);
-            }
-        }
-
-        results.forEach((item, index) => {
+        internetResults.forEach((item, index) => {
             let provider = "Google";
             const link = (item.link || "").toLowerCase();
             const title = (item.title || "").toLowerCase();
             const snippet = (item.snippet || "").toLowerCase();
             const rawTarget = targetName || "";
-            const nameLower = rawTarget.toLowerCase().replace(/["']/g, ""); // Strip quotes for matching
+            const nameLower = rawTarget.toLowerCase().replace(/["']/g, "");
             const titleLower = title.toLowerCase();
             const targetNameStr = targetName.toLowerCase();
 
-            // console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
-
-            // 0. Provider Labeling (Before filters)
             if (link.includes("linkedin.com")) provider = "LinkedIn";
             else if (link.includes("instagram.com")) provider = "Instagram";
-            else if (link.includes("bumble.com")) provider = "Bumble";
-            else if (link.includes("facebook.com")) provider = "Facebook";
             else if (link.includes("twitter.com") || link.includes("x.com")) provider = "Twitter/X";
-            else if (link.includes("rocketreach.co")) provider = "RocketReach";
+            else if (link.includes("facebook.com")) provider = "Facebook";
             else if (link.includes("wikipedia.org")) provider = "Wikipedia";
-            else if (link.includes("imdb.com")) provider = "IMDb";
-            else if (link.includes("britannica.com")) provider = "Britannica";
 
-            // FILTERS: Apply name consistency checks to ALL results
-            const nameParts = nameLower.split(" ").filter(p => p.length > 1); // "ahmed", "khatri"
+            const nameParts = nameLower.split(" ").filter(p => p.length > 2); // Only match parts with > 2 chars
             if (nameParts.length === 0) return;
 
-            // 1. Check for PRESENCE of name parts (Loosened to allow any significant name part)
+            // LOOSENED FILTER: Allow if at least ONE part matches, or if it's a known high-trust source
             const matchedParts = nameParts.filter(part => title.includes(part) || snippet.includes(part));
-            const hasMinMatch = matchedParts.length >= 1;
+            
+            const isHighTrust = link.includes('linkedin.com') || link.includes('wikipedia.org') || link.includes('twitter.com') || link.includes('x.com');
+            const matchesEnough = matchedParts.length >= 1; // Loosened from requiring all parts
 
-            if (!hasMinMatch) {
-                // Refinement Mode Check: If keywords are matched in title/snippet, allow even if name parts are missing
-                const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
-                const matchesKeyword = keywordsList.some(kw => title.includes(kw) || snippet.includes(kw));
-
-                // Alias Check: For high-confidence knowledge sources (Wikipedia/IMDB), allow alias matching
-                const isKnowledgeSource = link.includes('wikipedia.org') || link.includes('imdb.com/name') || link.includes('britannica.com');
-
-                if ((isRefinement && matchesKeyword) || isKnowledgeSource) {
-                    console.log(`[Discovery] Keeping result despite name mismatch (Keyword/Knowledge): ${title}`);
-                } else {
-                    console.log(`[Filter] Dropped(No Name Match): ${title} `);
-                    return;
-                }
+            if (!matchesEnough && !isHighTrust) {
+                const isKnowledge = link.includes('wikipedia.org') || link.includes('imdb.com/name');
+                if (!isKnowledge && !(isRefinement && provider !== "Google")) return;
             }
 
-            if (simpleMode && !isRefinement) {
-                const nameIndex = titleLower.indexOf(targetNameStr);
+            // Filtering
+            if (title.includes("profiles |") || title.includes("find people") || link.includes("/search/")) return;
 
-                if (nameIndex !== -1) {
-                    const separators = ["-", "|", ":", ",", "·", "•", "(", ")", "[", "]", "@", " at ", " from ", " for ", " on "];
-
-                    // --- PREFIX CHECK ---
-                    if (nameIndex > 0) {
-                        const preceedingText = titleLower.substring(0, nameIndex).trim();
-                        const lastChar = preceedingText.slice(-1);
-
-                        if (!separators.some(sep => sep.trim() === lastChar || preceedingText.endsWith(sep))) {
-                            const allowedPrefixes = ["mr", "mr.", "dr", "dr.", "prof", "user", "member", "student", "about", "images", "photos", "profile", "view", "contact", "biography", "bio", "follow", "visit", "see", "meet", "official", "verified", "account", "handle", "linkedin", "meet"];
-                            const wordsBefore = preceedingText.split(" ");
-                            const wordBefore = wordsBefore[wordsBefore.length - 1];
-
-                            // Loosen: Allow keywords as prefixes and only log unknown ones instead of dropping
-                            const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
-                            const isKeywordMatch = keywordsList.some(kw => wordBefore.includes(kw));
-
-                            if (wordBefore && !allowedPrefixes.includes(wordBefore) && !isKeywordMatch && !wordBefore.startsWith('@') && isNaN(wordBefore) && provider === "Google") {
-                                console.log(`[Filter] Weak Anchor (Prefix '${wordBefore}'): ${title} - Allowing with penalty`);
-                                // Note: We no longer 'return' here. We allow the result but it will naturally score lower if not boosted by keywords.
-                            }
-                        }
-                    }
-
-                    // --- POSTFIX CHECK ---
-                    const endIndex = nameIndex + targetNameStr.length;
-                    if (endIndex < titleLower.length) {
-                        const followingText = titleLower.substring(endIndex).trim();
-                        const firstChar = followingText.charAt(0);
-
-                        if (!separators.some(sep => sep.trim() === firstChar || followingText.startsWith(sep))) {
-                            const allowedSuffixes = ["jr", "sr", "iii", "phd", "md", "profile", "contact", "info", "linkedin", "instagram", "facebook", "twitter", "defined", "wiki", "bio", "net", "org", "com", "official", "page", "account", "handle", "connect", "following", "status", "reels", "real", "verified"];
-
-                            // Context-Aware Filtering: Allow keywords in the postfix
-                            const keywordsList = identityContext?.keywords ? identityContext.keywords.toLowerCase().split(/\s+/) : [];
-                            const wordsAfter = followingText.split(" ");
-                            const wordAfter = wordsAfter[0];
-
-                            if (wordAfter && !allowedSuffixes.includes(wordAfter) && !keywordsList.includes(wordAfter) && !wordAfter.startsWith('@') && !wordAfter.startsWith('(') && isNaN(wordAfter) && wordAfter.length > 1 && provider === "Google") {
-                                console.log(`[Filter] Weak Anchor (Postfix '${wordAfter}'): ${title} - Allowing with penalty`);
-                                // Note: We no longer 'return' here.
-                            }
-                        }
-                    }
-                }
-
-                // 3. Directory & Junk Filtering
-                const isDirectory =
-                    /\d+\+? ["'].*["'] profiles/.test(title) ||
-                    title.includes("profiles |") ||
-                    title.includes("search results") ||
-                    title.includes("find people") ||
-                    title.includes("people named") ||
-                    title.includes("profiles of") ||
-                    link.includes("/pub/dir/") ||
-                    link.includes("/search/") ||
-                    link.includes("linkedin.com/search/results/") ||
-                    link.includes("linkedin.com/pub/dir/") ||
-                    snippet.includes("view the profiles of people named") ||
-                    snippet.includes("results found for");
-
-                if (isDirectory) {
-                    console.log(`[Filter] Dropped(Directory): ${title} `);
-                    return;
-                }
-
-                const articleKeywords = [
-                    'wants to', 'how to', 'facts about', 'things about',
-                    'reasons why', 'ways to', 'tips for', 'guide to',
-                    'everything you need to know', 'what you need to know',
-                    'here\'s how', 'here\'s why', 'why you should',
-                    'breaking:', 'news:', 'report:', 'exclusive:',
-                    'interview:', 'says', 'announces', 'reveals',
-                    'just now', 'today\'s', 'latest', 'find', 'results', 'profiles of'
-                ];
-                const isArticle = articleKeywords.some(keyword => title.includes(keyword) || snippet.includes(keyword));
-                if (isArticle) {
-                    console.log(`[Filter] Dropped(Article): ${title} `);
-                    return;
-                }
-
-                const noisePatterns = ["photo by", "photograph by", "congratulations to", "congrats to", "proud of", "event", "album", "wedding of", "funeral of", "in memory of", "condolences", "article by"];
-                const isNoise = noisePatterns.some(ptn => title.includes(ptn) || snippet.includes(ptn));
-                if (isNoise) {
-                    console.log(`[Filter] Dropped(Noise): ${title} `);
-                    return;
-                }
-                const knowledgeDomains = ['wikipedia.org', 'imdb.com/name', 'britannica.com', 'biography.com'];
-                const isKnowledge = knowledgeDomains.some(d => link.includes(d));
-
-                if (isKnowledge) {
-                    processedInternet.push({
-                        id: `knowledge-${index}`,
-                        title: item.title || "Untitled Result",
-                        text: item.snippet || "No description available",
-                        url: item.link || "",
-                        source: "Internet", // Explicitly internet
-                        provider: provider,
-                        type: "KNOWLEDGE",
-                        priority: 0, // Top priority
-                        images: item.imageUrl ? [item.imageUrl] : []
-                    });
-                    return;
-                }
-            }
-
-            // console.log(`[Loop] Result: "${title}" | Provider: ${provider} `);
+            processedInternet.push({
+                id: `internet-${index}`,
+                title: item.title || "Untitled",
+                text: item.snippet || "No description",
+                url: item.link || "",
+                source: "Internet",
+                provider: provider,
+                type: link.includes("wikipedia.org") ? "KNOWLEDGE" : "SOCIAL",
+                priority: link.includes("wikipedia.org") ? 0 : 3,
+                images: item.imageUrl ? [item.imageUrl] : []
+            });
         });
-        
+
         internetResults = processedInternet;
+        
+        // Cache Update
+        if (internetResults.length > 0 && !isRefinement) {
+            SearchCache.findOneAndUpdate({ query: cacheKey }, { results: internetResults, timestamp: new Date() }, { upsert: true }).catch(() => {});
+        }
     } catch (err) {
-        console.error("Serper.dev search failed:", err.message);
+        console.error("Internet Search Phase fail:", err.message);
     }
 
-    // Deduplication
-    const internetMap = new Map();
-    internetResults.forEach(item => {
-        if (!item.url) return;
-        const key = normalize(item.url);
-        if (!internetMap.has(key)) internetMap.set(key, item);
-    });
-    const dedupedInternetResults = Array.from(internetMap.values());
-
+    // 4. Grouping and Final Ranking
     if (skipLocal) {
-        return rankResults(dedupedInternetResults, query, identityContext);
+        return rankResults(internetResults, query, identityContext);
     }
 
     const localMap = new Map();
     [
-        ...mongoResults.map(doc => ({ id: doc._id, text: doc.text, source: "MongoDB", type: "RECORD", priority: 2 })),
-        ...sqliteResults.map(doc => ({
-            id: doc.id,
-            text: doc.text, // Already contains the name/title in correct format
-            source: "SQLite",
-            type: "PROFILE",
-            priority: 1,
-            images: [doc.image].filter(Boolean)
-        }))
+        ...mongoResults.map(doc => ({ id: doc._id, text: doc.text, source: "MongoDB", type: "RECORD", priority: 2, images: [] })),
+        ...sqliteResults.map(doc => ({ id: doc.id, text: doc.text, source: "SQLite", type: "PROFILE", priority: 1, images: [doc.image].filter(Boolean) }))
     ].forEach(item => {
         const key = normalize(item.text);
         if (!localMap.has(key)) localMap.set(key, item);
     });
-    const dedupedLocalResults = Array.from(localMap.values());
 
-    const combined = [...dedupedLocalResults, ...dedupedInternetResults];
-    const finalRanked = rankResults(combined, query, identityContext);
-
-    return finalRanked;
+    const combined = [...Array.from(localMap.values()), ...internetResults];
+    return rankResults(combined, query, identityContext);
 }
-
-
 
 /**
  * Stage 1 & 2: Identification
@@ -1237,7 +1136,9 @@ router.post("/deep", async (req, res) => {
 
     // 3. Final Name Polish: ensure we have at least First and Last name
     // But DON'T aggressively cut to 2 words if it's already a clean name
+    // TIGHTENING: Strip all internal quotes to prevent ""name"" pollution
     name = name.replace(/["'()]/g, "").trim();
+    keyword = (keyword || "").replace(/["'()]/g, "").trim();
 
     // Scrub common "junk" descriptions from professions/location
     const scrub = (str) => {
@@ -1754,6 +1655,7 @@ router.post("/deep", async (req, res) => {
                 name,
                 location: location || person.location,
                 description: finalDescription,
+                aiSummary: aiSummary,
                 emails: maskedEmails,
                 phoneNumbers: maskedPhones,
                 unmaskedEmails: finalEmails, // Keeping for potential interior logic needs

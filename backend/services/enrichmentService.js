@@ -4,7 +4,7 @@ import { searchPublicSignals } from './osintService.js';
 import { enrichWithSnov } from '../providers/snov.js';
 import { enrichWithApollo } from '../providers/apollo.js';
 
-import { performSearch } from '../routes/multiSearch.js';
+import { searchFree } from '../utils/freeSearch.js';
 
 /**
  * Attempt to find a corporate domain from a company name.
@@ -35,7 +35,7 @@ async function findDomain(company) {
     cleanCompany = cleanCompany.split(/[(),-|]/)[0].trim().slice(0, 64);
     if (!cleanCompany || cleanCompany.length < 2) return null;
 
-    const results = await performSearch(`${cleanCompany} official website domain`, true).catch(() => []);
+    const results = await searchFree(`${cleanCompany} official website domain`).catch(() => []);
     if (results && results.length > 0) {
         // Look for the first clean corporate link, avoiding common consumer/social sites 
         // that pollute general company searches.

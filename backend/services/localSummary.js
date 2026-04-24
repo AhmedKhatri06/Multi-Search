@@ -129,7 +129,7 @@ export async function ollamaGenerateText(prompt, systemPrompt = '', options = {}
         return null;
     } catch (error) {
         if (error.name === 'AbortError') {
-            console.warn(`[LocalSummary] Ollama request timed out after ${timeoutMs}ms`);
+            console.warn(`[LocalSummary] Ollama request timed out after ${options.timeoutMs}ms`);
         } else {
             console.error(`[LocalSummary] Ollama error: ${error.message}`);
         }

@@ -1,6 +1,7 @@
 import Groq from "groq-sdk";
 import dotenv from "dotenv";
 import { ollamaGenerateText } from "./localSummary.js";
+import { geminiGenerateJSON, geminiGenerateText } from "./geminiService.js";
 
 dotenv.config();
 
@@ -15,6 +16,153 @@ const groq = new Groq({ apiKey: (process.env.GROQ_API_KEY || "").trim() });
  * @param {Array} params.searchResults
  * @returns {Promise<Array|string>} Structured list of people or "No confident candidates found"
  */
+/**
+ * Strict handler for Ollama-based candidate card generation.
+ * Converts raw search results and local data into a standardized JSON list.
+ */
+export const ollamaCandidateHandler = async ({ name, searchResults }) => {
+    const systemPrompt = `
+      You are a specialized Data Processing Unit. Your goal is to convert search results into a clean selection list of potential people.
+      
+      STRICT RULES:
+      1. OUTPUT FORMAT: You MUST return a JSON array of objects.
+      2. FIELD 1 (title): The Full Name of the person.
+      3. FIELD 2 (subtitle): A 1-line professional description (e.g. "Software Engineer at Google").
+      4. FIELD 3 (source): The website or database where found (e.g. "LinkedIn", "MongoDB", "Wikipedia").
+      5. FIELD 4 (url): The link to the source profile.
+      6. NO EXPLANATIONS: Return ONLY the JSON. No markdown backticks.
+      
+      IDENTITY RULES:
+      - If multiple DIFFERENT people have the same name, list them as separate objects.
+      - Clean titles to remove clutter like "Profiles |" or "(@Handle)".
+    `;
+
+    const userPrompt = `
+      Target Name: ${name}
+      Data to Process: ${JSON.stringify(searchResults.map(r => ({
+          title: r.title || r.name,
+          snippet: r.snippet || r.text || r.subtitle,
+          url: r.url || r.link
+      })), null, 1)}
+    `;
+
+    try {
+        const text = await ollamaGenerateText(userPrompt, systemPrompt, { 
+            temperature: 0.1, // Strictest possible output
+            timeoutMs: 20000 
+        });
+
+        if (!text) return [];
+
+        // Parsing logic with fallback
+        const jsonMatch = text.match(/\[\s*\{.*\}\s*\]/s);
+        if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return Array.isArray(parsed) ? parsed : [];
+        }
+
+        // Final attempt at parsing raw text
+        return JSON.parse(text);
+    } catch (e) {
+        console.error("[OllamaHandler] Extraction fail:", e.message);
+        return [];
+    }
+};
+
+/**
+ * Resilient candidate card generation.
+ * Primary: Gemini 2.0 (High Precision)
+ * Fallback: Groq Llama 3.3 (High Speed / No Quota)
+ */
+export const geminiCandidateHandler = async ({ name, searchResults }) => {
+    const systemPrompt = `
+      You are a specialized Data Processing Unit. Your goal is to convert search results into a clean selection list of potential people.
+      
+      STRICT RULES:
+      1. OUTPUT FORMAT: You MUST return a JSON array of objects.
+      2. FIELD 1 (title): The Full Name of the person.
+      3. FIELD 2 (subtitle): A 1-line professional description (e.g. "Software Engineer at Google").
+      4. FIELD 3 (source): The website or database where found (e.g. "LinkedIn", "MongoDB", "Wikipedia").
+      5. FIELD 4 (url): The link to the source profile.
+      
+      IDENTITY RULES:
+      - If multiple DIFFERENT people have the same name, list them as separate objects.
+      - Clean titles to remove clutter like "Profiles |" or "(@Handle)".
+      - Return ONLY the JSON array.
+    `;
+
+    const data = searchResults.map(r => ({
+        title: r.title || r.name,
+        subtitle: r.snippet || r.text || r.subtitle,
+        url: r.url || r.link
+    }));
+
+    // PHASE 1: Try Gemini
+    try {
+        console.log(`[AI] Attempting Identity Discovery via Gemini 2.0...`);
+        const candidates = await geminiGenerateJSON(JSON.stringify(data), systemPrompt);
+        return Array.isArray(candidates) ? candidates : [];
+    } catch (e) {
+        // PHASE 2: Fallback to Groq if Rate Limited (429) or other failure
+        if (e.message.includes('429') || e.message.includes('quota')) {
+            console.warn(`[AI] Gemini Quota Exceeded (429). Falling back to Groq Llama 3.3...`);
+        } else {
+            console.error(`[AI] Gemini fail: ${e.message}. Attempting Groq fallback...`);
+        }
+
+        try {
+            const chatCompletion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: `Target: ${name}\nData: ${JSON.stringify(data)}` }
+                ],
+                model: "llama-3.3-70b-versatile",
+                temperature: 0.1,
+            });
+
+            let text = chatCompletion.choices[0]?.message?.content?.trim() || "";
+            if (text.startsWith("```")) {
+                text = text.replace(/```(json)?/g, "").replace(/```/g, "").trim();
+            }
+
+            const jsonMatch = text.match(/\[\s*\{.*\}\s*\]/s);
+            if (jsonMatch) {
+                return JSON.parse(jsonMatch[0]);
+            }
+            return JSON.parse(text);
+        } catch (groqErr) {
+            console.error(`[AI] Hybrid Fallback Failed (Groq): ${groqErr.message}`);
+            return [];
+        }
+    }
+};
+
+/**
+ * Resilient text generation.
+ * Falls back to Groq if Gemini fails.
+ */
+export const getResilientText = async (prompt, systemPrompt = "") => {
+    try {
+        return await geminiGenerateText(prompt, systemPrompt);
+    } catch (e) {
+        console.warn(`[AI Text] Gemini failed: ${e.message}. Falling back to Groq...`);
+        try {
+            const chatCompletion = await groq.chat.completions.create({
+                messages: [
+                    { role: "system", content: systemPrompt },
+                    { role: "user", content: prompt }
+                ],
+                model: "llama-3.1-8b-instant",
+                temperature: 0.1,
+            });
+            return chatCompletion.choices[0]?.message?.content?.trim() || "";
+        } catch (groqErr) {
+            console.error(`[AI Text] Groq Fallback failed: ${groqErr.message}`);
+            return "";
+        }
+    }
+};
+
 export const identifyPeople = async ({ name, location, keywords, searchResults }) => {
     if (!process.env.GROQ_API_KEY) {
         console.error("GROQ_API_KEY is missing in environment variables.");

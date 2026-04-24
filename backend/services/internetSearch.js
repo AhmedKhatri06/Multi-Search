@@ -1,10 +1,11 @@
 import axios from 'axios';
 import dotenv from 'dotenv';
+import { searchFree } from '../utils/freeSearch.js';
 
 dotenv.config();
 
 /**
- * Execute multiple dork queries via Serper and aggregate unique results.
+ * Execute multiple dork queries via Free Engine and aggregate unique results.
  * Each dork is a separate API call; results are merged and deduplicated by URL.
  * 
  * @param {string[]} dorks - Array of Google Dork query strings
@@ -14,69 +15,42 @@ dotenv.config();
 export async function searchWithDorks(dorks, numPerQuery = 10) {
     if (!dorks || dorks.length === 0) return [];
 
-    const apiKey = (process.env.SERPER_API_KEY || "").trim();
-    if (!apiKey) {
-        console.error('[Dorking] SERPER_API_KEY not configured');
-        return [];
+    console.log(`[Dorking] Executing ${dorks.length} dorks using Primary Free Engine...`);
+    
+    // We run dorks sequentially in free mode to avoid instance rate-limiting
+    const results = [];
+    for (const dork of dorks) {
+        const res = await searchFree(dork);
+        results.push(...res);
     }
 
-    // console.log(`[Dorking] Executing ${dorks.length} dork queries...`);
-
-    const promises = dorks.map(async (dork, index) => {
-        try {
-            // TIGHTENING: Serper has a character limit for queries (usually 256-512)
-            // We cap at 256 to be safe and avoid 400 Bad Request
-            const safeDork = dork.length > 256 ? dork.substring(0, 256).trim() : dork;
-            
-            // console.log(`  [Dork ${index + 1}] ${safeDork.slice(0, 80)}...`);
-            const response = await axios.post('https://google.serper.dev/search', {
-                q: safeDork,
-                num: numPerQuery
-            }, {
-                headers: {
-                    'X-API-KEY': apiKey,
-                    'Content-Type': 'application/json'
-                },
-                timeout: 15000
-            });
-
-            const results = response.data?.organic || [];
-            // console.log(`  [Dork ${index + 1}] Got ${results.length} results`);
-
-            return results.map((item, i) => ({
-                id: `dork-${index}-${i}`,
-                title: item.title || 'Untitled',
-                text: item.snippet || '',
-                snippet: item.snippet || '',
-                url: item.link || '',
-                link: item.link || '',
-                source: 'Internet',
-                provider: 'Google Dork',
-                type: 'AUX',
-                priority: 3,
-                images: item.imageUrl ? [item.imageUrl] : [],
-                dorkQuery: dork
-            }));
-        } catch (err) {
-            console.error(`  [Dork ${index + 1}] Failed: ${err.message}`);
-            return [];
-        }
-    });
-
-    const allResults = await Promise.all(promises);
+    // Map to the unified structure
+    const mapped = results.map((item, i) => ({
+        id: `dork-free-${i}`,
+        title: item.title || 'Untitled',
+        text: item.snippet || '',
+        snippet: item.snippet || '',
+        url: item.link || '',
+        link: item.link || '',
+        source: 'Internet',
+        provider: item.source || 'Free Search',
+        type: 'AUX',
+        priority: 3,
+        images: item.imageUrl ? [item.imageUrl] : [],
+        dorkQuery: item.dorkQuery
+    }));
 
     // Deduplicate by URL
-    const seenUrls = new Map();
-    for (const results of allResults) {
-        for (const item of results) {
-            const normalizedUrl = (item.url || '').split('?')[0].replace(/\/$/, '').toLowerCase();
-            if (normalizedUrl && !seenUrls.has(normalizedUrl)) {
-                seenUrls.set(normalizedUrl, item);
-            }
+    const seenUrls = new Set();
+    const deduped = mapped.filter(item => {
+        const normalizedUrl = (item.url || '').split('?')[0].replace(/\/$/, '').toLowerCase();
+        if (normalizedUrl && !seenUrls.has(normalizedUrl)) {
+            seenUrls.add(normalizedUrl);
+            return true;
         }
-    }
+        return false;
+    });
 
-    const deduped = Array.from(seenUrls.values());
     console.log(`[Dorking] Total unique results: ${deduped.length}`);
     return deduped;
 }
@@ -84,34 +58,19 @@ export async function searchWithDorks(dorks, numPerQuery = 10) {
 
 export async function searchInternet(query) {
     try {
-        const data = JSON.stringify({
-            "q": query,
-            "num": 20
-        });
-
-        const config = {
-            method: 'post',
-            url: 'https://google.serper.dev/search',
-            headers: {
-                'X-API-KEY': (process.env.SERPER_API_KEY || "").trim(),
-                'Content-Type': 'application/json'
-            },
-            data: data
-        };
-
-        const response = await axios(config);
-        const results = response.data?.organic || [];
+        console.log(`[Search] Using Primary Free Engine for internet search: "${query}"`);
+        const results = await searchFree(query);
 
         return results.map((item, index) => ({
-            id: `google-${index}`,
+            id: `google-free-${index}`,
             title: item.title,
             snippet: item.snippet,
             link: item.link,
-            thumbnail: item.imageUrl, // Serper uses imageUrl
-            source: 'Google'
+            thumbnail: item.url, // Standard link as thumbnail fallback
+            source: item.source || 'Search'
         }));
     } catch (error) {
-        console.error('Internet search failed:', error.response?.data || error.message);
+        console.error('Internet search failed:', error.message);
         return [];
     }
 }
@@ -198,52 +157,24 @@ export function calculateImageScore(item, targetName = "", contextKeywords = [])
 }
 
 /**
- * Specialized Image Search using Serper.dev
+ * Specialized Image Search using Free Engine
  */
 export async function searchImages(query, targetName = "", contextKeywords = []) {
     try {
-        // SIMPLIFIED: Serper /images endpoint often rejects highly complex OR queries
-        const data = JSON.stringify({
-            "q": query,
-            "num": 20
-        });
+        console.log(`[Search] Using Primary Free Engine for image search: "${query}"`);
+        const results = await searchFree(query);
 
-        const config = {
-            method: 'post',
-            url: 'https://google.serper.dev/images',
-            headers: {
-                'X-API-KEY': (process.env.SERPER_API_KEY || "").trim(),
-                'Content-Type': 'application/json'
-            },
-            data: data
-        };
-
-        const response = await axios(config);
-        const results = response.data?.images || [];
-
-        // Apply scoring with context
-        const scored = results.map(item => ({
-            ...item,
-            score: calculateImageScore(item, targetName, contextKeywords)
-        }));
-
-        // Filter and Sort by Confidence
-        // SOFTENED: Lowered threshold to 5 to allow more results in for face verification to decide
-        const filtered = scored
-            .filter(item => item.score >= 5)
-            .sort((a, b) => b.score - a.score);
-
-        return filtered.map((item, index) => ({
-            id: `image-${index}`,
+        return results.map((item, index) => ({
+            id: `free-image-${index}`,
             title: item.title,
-            imageUrl: item.imageUrl,
-            thumbnailUrl: item.thumbnailUrl,
+            imageUrl: item.link, 
+            thumbnailUrl: item.link,
             sourceUrl: item.link,
-            source: 'Google Images',
-            confidence: item.score
+            source: item.source || 'Free Search',
+            confidence: 5 // Low confidence for non-image specialized results
         }));
     } catch (error) {
-        console.error('Image search failed:', error.response?.data || error.message);
+        console.error('Image search failed:', error.message);
         return [];
     }
 }
